@@ -1,0 +1,8 @@
+# Ignore draft merge request markdown file
+draft_mr.md
+
+# Optional: Ignore common system files and editor folders (uncomment if desired)
+# .DS_Store
+# Thumbs.db
+# .vscode/
+# *.swp
