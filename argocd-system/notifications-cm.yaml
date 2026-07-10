@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+  namespace: argocd
+data:
+  service.slack: |
+    token: $slack-token
+  trigger.on-sync-failed: |
+    - when: app.status.operationState != nil and app.status.operationState.phase in ['Error', 'Failed']
+      send: [app-sync-failed]
+  trigger.on-health-degraded: |
+    - when: app.status.health.status == 'Degraded'
+      send: [app-health-degraded]
+  template.app-sync-failed: |
+    message: |
+      :x: Sync failed for {{.app.metadata.name}} ({{.app.metadata.labels.env}}).
+      Project: {{.app.spec.project}}
+      Revision: {{.app.status.sync.revision}}
+      {{.context.argocdUrl}}/applications/{{.app.metadata.name}}
+  template.app-health-degraded: |
+    message: |
+      :warning: Health degraded for {{.app.metadata.name}} ({{.app.metadata.labels.env}}).
+      Project: {{.app.spec.project}}
+      {{.context.argocdUrl}}/applications/{{.app.metadata.name}}
+  subscriptions: |
+    - recipients:
+        - slack:taxcalc-deploys-sai
+      selector: team=taxcalc
+      triggers:
+        - on-sync-failed
+        - on-health-degraded
