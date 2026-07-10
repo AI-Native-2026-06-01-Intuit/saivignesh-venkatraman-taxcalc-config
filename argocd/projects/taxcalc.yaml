@@ -1,0 +1,68 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: taxcalc
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: taxcalc-api GitOps workloads for dev/staging/prod
+  sourceRepos:
+    - https://github.com/AI-Native-2026-06-01-Intuit/saivignesh-venkatraman-taxcalc-config.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: taxcalc-dev
+    - server: https://kubernetes.default.svc
+      namespace: taxcalc-staging
+    - server: https://kubernetes.default.svc
+      namespace: taxcalc-prod
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: Secret
+    - group: apps
+      kind: Deployment
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+    - group: networking.k8s.io
+      kind: Ingress
+    - group: monitoring.coreos.com
+      kind: ServiceMonitor
+    - group: monitoring.coreos.com
+      kind: PrometheusRule
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: ResourceQuota
+    - group: ""
+      kind: LimitRange
+  roles:
+    - name: developers
+      description: Sync dev/staging only
+      groups:
+        - uptimecrew:taxcalc-engineers
+      policies:
+        - p, proj:taxcalc:developers, applications, get, taxcalc/*, allow
+        - p, proj:taxcalc:developers, applications, sync, taxcalc/taxcalc-api-dev, allow
+        - p, proj:taxcalc:developers, applications, sync, taxcalc/taxcalc-api-staging, allow
+        - p, proj:taxcalc:developers, applications, delete, taxcalc/*, deny
+    - name: releasers
+      description: Sync all envs including prod
+      groups:
+        - uptimecrew:taxcalc-engineers-releasers
+      policies:
+        - p, proj:taxcalc:releasers, applications, get, taxcalc/*, allow
+        - p, proj:taxcalc:releasers, applications, sync, taxcalc/*, allow
+        - p, proj:taxcalc:releasers, applications, delete, taxcalc/*, deny
+  syncWindows:
+    - kind: deny
+      schedule: "0 17 * * 5"
+      duration: 60h
+      manualSync: true
+      applications:
+        - taxcalc-api-prod
+      namespaces:
+        - taxcalc-prod
