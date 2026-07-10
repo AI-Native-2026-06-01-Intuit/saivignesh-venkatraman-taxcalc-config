@@ -1,0 +1,66 @@
+# ApplicationSet generates dev/staging/prod apps from overlay paths.
+# For this local k3d assignment, prod keeps automated sync enabled.
+# Real prod may drop automated sync later and require manual promotion.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: taxcalc-api-envs
+  namespace: argocd
+spec:
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - env: dev
+                  overlay: overlays/dev
+                  namespace: taxcalc-dev
+                  wave: "0"
+                - env: staging
+                  overlay: overlays/staging
+                  namespace: taxcalc-staging
+                  wave: "1"
+                - env: prod
+                  overlay: overlays/prod
+                  namespace: taxcalc-prod
+                  wave: "2"
+          - clusters:
+              selector:
+                matchLabels:
+                  uptimecrew.example.internal/tier: workload
+  template:
+    metadata:
+      name: taxcalc-api-{{env}}
+      labels:
+        team: taxcalc
+        env: "{{env}}"
+      annotations:
+        argocd.argoproj.io/sync-wave: "{{wave}}"
+    spec:
+      project: taxcalc
+      source:
+        repoURL: https://github.com/AI-Native-2026-06-01-Intuit/saivignesh-venkatraman-taxcalc-config.git
+        targetRevision: main
+        path: "{{overlay}}"
+      destination:
+        server: "{{server}}"
+        namespace: "{{namespace}}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+          allowEmpty: false
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+          - PrunePropagationPolicy=foreground
+          - PruneLast=true
+          - ApplyOutOfSyncOnly=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
