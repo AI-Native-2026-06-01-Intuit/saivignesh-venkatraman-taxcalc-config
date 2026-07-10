@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: taxcalc-api-config
+data:
+  SPRING_PROFILES_ACTIVE: staging
+  LOGGING_LEVEL_ROOT: INFO
+  SPRING_DATASOURCE_URL: jdbc:postgresql://postgres.taxcalc-staging.svc.cluster.local:5432/taxcalc_dev
+  SPRING_DATA_MONGODB_URI: mongodb://mongo.taxcalc-staging.svc.cluster.local:27017/taxcalc
+  SPRING_DATA_REDIS_HOST: redis.taxcalc-staging.svc.cluster.local
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka.taxcalc-staging.svc.cluster.local:9092
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol.taxcalc-staging.svc.cluster.local:4317
