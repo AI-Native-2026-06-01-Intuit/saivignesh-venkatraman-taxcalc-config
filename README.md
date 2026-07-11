@@ -64,6 +64,27 @@ Overlays rewrite the base image `uptimecrew/taxcalc-api:0.1.1` to:
 
 The app repo CI opens PRs that bump `overlays/dev/kustomization.yaml` via `_bump-config.yml` using secret `GITOPS_REPO_TOKEN_SAI`.
 
+## Private ECR image pull behavior
+
+The GitOps manifests reference `imagePullSecrets`:
+
+```yaml
+imagePullSecrets:
+  - name: ecr-pull-sai
+```
+
+The actual `ecr-pull-sai` Secret is intentionally not committed to Git. It is created out-of-band in each target namespace because ECR credentials are short-lived and sensitive.
+
+For local k3d / non-EKS clusters, run:
+
+```bash
+./scripts/bootstrap-ecr-pull-secret.sh
+```
+
+For EKS, the preferred production posture is node IAM or pod/node-level ECR pull permissions. The `imagePullSecret` path is used for local k3d and clusters without native ECR integration.
+
+If Zscaler or corp VPN intercepts TLS, you may see `x509: certificate signed by unknown authority` after auth succeeds. In that case, import the image into k3d (`k3d image import`) or configure the k3d node/containerd trust store for local evidence.
+
 ## Install tooling (local)
 
 ```bash
@@ -109,7 +130,13 @@ kubectl -n argocd label secret <cluster-secret-name> uptimecrew.example.internal
 
 ## Apply AppProject, dev Application, ApplicationSet
 
-Bootstrap workload namespaces first (see [Namespace / bootstrap contract](#namespace--bootstrap-contract)), then:
+Bootstrap workload namespaces first (see [Namespace / bootstrap contract](#namespace--bootstrap-contract)), then create the ECR pull secret (see [Private ECR image pull behavior](#private-ecr-image-pull-behavior)):
+
+```bash
+./scripts/bootstrap-ecr-pull-secret.sh
+```
+
+Apply Argo CD resources:
 
 ```bash
 kubectl -n argocd apply -f argocd/projects/taxcalc.yaml

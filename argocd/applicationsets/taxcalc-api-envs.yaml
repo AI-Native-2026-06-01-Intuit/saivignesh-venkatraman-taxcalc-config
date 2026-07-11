@@ -33,6 +33,8 @@ spec:
   template:
     metadata:
       name: taxcalc-api-{{env}}
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
       labels:
         team: taxcalc
         env: "{{env}}"

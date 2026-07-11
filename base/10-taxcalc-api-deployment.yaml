@@ -31,6 +31,8 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         fsGroup: 65532
+      imagePullSecrets:
+        - name: ecr-pull-sai
       containers:
         - name: taxcalc-api
           image: uptimecrew/taxcalc-api:0.1.1
