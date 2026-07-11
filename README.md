@@ -19,6 +19,8 @@ Promoted W5D3 workload manifests from the app repo into a Kustomize `base/` plus
 
 Reconcile loop: app CI on `main` pushes ECR → opens a dev overlay bump PR here via `_bump-config.yml` → merge updates desired state → Argo CD syncs with automated prune/selfHeal. For this k3d assignment, prod keeps automated sync; real prod may require manual promotion later.
 
+**Note:** We are using Argo CD v3.x for this assignment due to setup issues encountered with the v2.11.7 install path from the course materials. The manifests and GitOps patterns in this repo remain the same; only the local Argo CD version differs.
+
 ## Layout
 
 ```text
@@ -32,9 +34,23 @@ argocd-system/                # Argo CD Notifications ConfigMap (no Secret commi
 
 Commits in this repo are split by concern: base manifests, env overlays, Argo CD project/apps, notifications, and docs — so each layer can be reviewed independently.
 
+## Namespace / bootstrap contract
+
+`CreateNamespace=true` is retained on Applications per W6D2 rubric. Because the AppProject intentionally keeps `clusterResourceWhitelist: []` to prevent app-managed cluster-scoped resources, the local k3d namespaces `taxcalc-dev`, `taxcalc-staging`, and `taxcalc-prod` are bootstrap-owned and pre-created out-of-band. Argo manages only the namespace-scoped application resources inside those destinations.
+
+Pre-create workload namespaces before the first sync (platform/bootstrap, not GitOps):
+
+```bash
+kubectl create namespace taxcalc-dev --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace taxcalc-staging --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace taxcalc-prod --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Run `./check-gitops-config-ready.sh` to validate repo config; missing live namespaces warn only (local bootstrap prerequisite for sync evidence, not a merge blocker).
+
 ## W6D2 guardrails
 
-- **No Namespace object in base**: Argo CD `CreateNamespace=true` creates `taxcalc-dev|staging|prod` at sync time. The AppProject keeps `clusterResourceWhitelist: []`, so cluster-scoped Namespace objects are not managed by the app team.
+- **No Namespace object in base/overlays**: Namespace YAML is never committed here. `CreateNamespace=true` stays on Applications per rubric, but with `clusterResourceWhitelist: []` the target namespaces must already exist — bootstrap them out-of-band before sync evidence.
 - **No ResourceQuota / LimitRange in base**: `manifests/00-namespace.yaml` in the app repo bundles platform-owned quota/limit objects. Those are intentionally excluded from this GitOps base because the AppProject blacklists `ResourceQuota` and `LimitRange`.
 - **ServiceMonitor / PrometheusRule**: omitted from base for now because local k3d may lack Prometheus Operator CRDs. Kinds remain allowed in the AppProject for a later observability follow-up.
 - **Placeholder Secret only**: `base/40-taxcalc-api.secret.yaml` contains non-real placeholder values. Replace at deploy time via your secret manager or out-of-band `kubectl create secret`.
@@ -55,11 +71,15 @@ brew install argocd kustomize
 kubectl config current-context   # expect k3d-taxcalc for this assignment
 ```
 
-## Install Argo CD v2.11.7
+## Install Argo CD v3.x
+
+> **Why v3.x?** The W6D2 course materials pin Argo CD v2.11.7, but that install path caused setup issues on our local `k3d-taxcalc` cluster (rollout failures / compatibility friction). We switched to Argo CD **v3.x** for a reliable local bootstrap. The GitOps manifests in this repo (`AppProject`, `Application`, `ApplicationSet`, notifications) are unchanged — only the controller install version differs.
+
+Pinned to `v3.0.23` below; any recent v3.x release should work for this assignment.
 
 ```bash
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.11.7/manifests/install.yaml
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.0.23/manifests/install.yaml
 kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=5m
 kubectl -n argocd rollout status deploy/argocd-repo-server --timeout=5m
 kubectl -n argocd rollout status deploy/argocd-server --timeout=5m
@@ -88,6 +108,8 @@ kubectl -n argocd label secret <cluster-secret-name> uptimecrew.example.internal
 ```
 
 ## Apply AppProject, dev Application, ApplicationSet
+
+Bootstrap workload namespaces first (see [Namespace / bootstrap contract](#namespace--bootstrap-contract)), then:
 
 ```bash
 kubectl -n argocd apply -f argocd/projects/taxcalc.yaml
