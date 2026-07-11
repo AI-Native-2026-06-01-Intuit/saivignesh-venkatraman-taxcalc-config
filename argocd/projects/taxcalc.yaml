@@ -19,17 +19,25 @@ spec:
   clusterResourceWhitelist: []
   namespaceResourceWhitelist:
     - group: ""
+      kind: Namespace
+    - group: ""
       kind: Service
     - group: ""
       kind: ConfigMap
     - group: ""
       kind: Secret
+    - group: ""
+      kind: ServiceAccount
     - group: apps
       kind: Deployment
     - group: autoscaling
       kind: HorizontalPodAutoscaler
+    - group: policy
+      kind: PodDisruptionBudget
     - group: networking.k8s.io
       kind: Ingress
+    - group: networking.k8s.io
+      kind: NetworkPolicy
     - group: monitoring.coreos.com
       kind: ServiceMonitor
     - group: monitoring.coreos.com
