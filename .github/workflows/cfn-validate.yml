@@ -1,0 +1,67 @@
+# .github/workflows/cfn-validate.yml
+# TASK 4 CI gate: every PR that touches cfn/ runs cfn-lint
+# (with cfn-lint-serverless rules), cfn-nag (--fail-on-warnings),
+# and aws cloudformation validate-template against every stack
+# template under cfn/. The validate-template step uses OIDC
+# against the bootstrap stack's CfnDeployRole.
+name: cfn-validate
+
+on:
+  pull_request:
+    paths:
+      - "cfn/**"
+      - ".github/workflows/cfn-validate.yml"
+  push:
+    branches: [main]
+    paths:
+      - "cfn/**"
+      - ".github/workflows/cfn-validate.yml"
+
+permissions:
+  contents: read # checkout
+  id-token: write # OIDC for aws cli
+
+jobs:
+  validate:
+    name: cfn-lint + cfn-nag + aws validate-template
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out config repo
+        uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4.1.7
+
+      - name: Set up Python (for cfn-lint + cfn-lint-serverless)
+        uses: actions/setup-python@39cd14951b08e74b54015e9e001cdefcf80e669f # v5.1.1
+        with:
+          python-version: "3.12"
+      # cfn-lint-serverless requires cfn-lint >= 1.44 (not 1.10.x)
+      - run: pip install "cfn-lint>=1.44.0" cfn-lint-serverless
+
+      - name: Set up Ruby (for cfn-nag)
+        uses: ruby/setup-ruby@a4effe49ee8ee5b8b5091268c473a4628afb5651 # v1.211.0
+        with:
+          ruby-version: "3.3"
+      - run: gem install cfn-nag -v 0.8.10
+
+      - name: cfn-lint (cfn-lint-serverless profile)
+        run: cfn-lint -a cfn_lint_serverless.rules cfn/*.yaml
+
+      - name: cfn-nag
+        run: cfn_nag_scan --input-path cfn --fail-on-warnings --output-format txt
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          # Bootstrap stack: taxcalc-bootstrap-dev-sai → RoleName taxcalc-api-cfn-deploy-sai
+          role-to-assume: arn:aws:iam::043000359802:role/taxcalc-api-cfn-deploy-sai
+          aws-region: us-east-1
+
+      - name: aws cloudformation validate-template (every cfn/*.yaml)
+        run: |
+          set -euo pipefail
+          for f in cfn/*.yaml; do
+            echo "== validate-template: $f =="
+            aws cloudformation validate-template \
+              --template-body "file://${f}" \
+              --region us-east-1
+          done
