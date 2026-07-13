@@ -4,8 +4,11 @@ metadata:
   name: argocd-notifications-cm
   namespace: argocd
 data:
-  service.slack: |
-    token: $slack-token
+  service.webhook.slack: |
+    url: $slack-webhook-url
+    headers:
+      - name: Content-Type
+        value: application/json
   trigger.on-sync-failed: |
     - when: app.status.operationState != nil and app.status.operationState.phase in ['Error', 'Failed']
       send: [app-sync-failed]
@@ -13,19 +16,20 @@ data:
     - when: app.status.health.status == 'Degraded'
       send: [app-health-degraded]
   template.app-sync-failed: |
-    message: |
-      :x: Sync failed for {{.app.metadata.name}} ({{.app.metadata.labels.env}}).
-      Project: {{.app.spec.project}}
-      Revision: {{.app.status.sync.revision}}
-      {{.context.argocdUrl}}/applications/{{.app.metadata.name}}
+    webhook:
+      slack:
+        method: POST
+        body: |
+          {"text":":x: Sync failed for {{.app.metadata.name}} ({{.app.metadata.labels.env}}).\nProject: {{.app.spec.project}}\nRevision: {{.app.status.sync.revision}}"}
   template.app-health-degraded: |
-    message: |
-      :warning: Health degraded for {{.app.metadata.name}} ({{.app.metadata.labels.env}}).
-      Project: {{.app.spec.project}}
-      {{.context.argocdUrl}}/applications/{{.app.metadata.name}}
+    webhook:
+      slack:
+        method: POST
+        body: |
+          {"text":":warning: Health degraded for {{.app.metadata.name}} ({{.app.metadata.labels.env}}).\nProject: {{.app.spec.project}}"}
   subscriptions: |
     - recipients:
-        - slack:taxcalc-deploys-sai
+        - slack
       selector: team=taxcalc
       triggers:
         - on-sync-failed
