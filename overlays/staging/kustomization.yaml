@@ -6,7 +6,7 @@ resources:
 images:
   - name: uptimecrew/taxcalc-api
     newName: 043000359802.dkr.ecr.us-east-1.amazonaws.com/uptimecrew/taxcalc-api_sai
-    newTag: 37f63b8a3456abc3532086474abf53b0c55dd672
+    newTag: 37f63b8a3456abc3532086474abf53b0c55dd672-arm64
 replicas:
   - name: taxcalc-api
     count: 2
