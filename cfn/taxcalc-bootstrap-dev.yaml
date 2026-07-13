@@ -50,6 +50,11 @@ Resources:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: Access logging deferred for training bootstrap bucket; PAB + KMS + deny-non-TLS already enforced.
     Properties:
       # Synthetic globally-unique name. AWS::AccountId disambiguates
       # across cohorts running the same stack in different accounts.
@@ -108,6 +113,11 @@ Resources:
   # repo's main branch + PR workflow. NEVER a wildcard sub claim.
   CfnDeployRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Stable RoleName taxcalc-api-cfn-deploy-sai required for GHA OIDC role-to-assume ARN.
     Properties:
       RoleName: taxcalc-api-cfn-deploy-sai
       AssumeRolePolicyDocument:

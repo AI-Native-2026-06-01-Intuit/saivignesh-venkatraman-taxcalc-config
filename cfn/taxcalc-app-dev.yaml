@@ -68,6 +68,11 @@ Resources:
   # --- DB security group: ingress 5432 only from the app SG.
   DbSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Stable GroupName required for operational identification across envs (_sai suffix).
     Properties:
       GroupName: !Sub "taxcalc-${EnvName}-db-sg-sai"
       GroupDescription: !Sub "taxcalc ${EnvName} DB SG (5432 from app SG only)."
@@ -80,6 +85,12 @@ Resources:
           SourceSecurityGroupId:
             Fn::ImportValue: !Sub "${NetworkStackName}-AppSgId"
           Description: Postgres from app SG only.
+      # Explicit egress required (cfn-nag F1000). Specifying any egress
+      # replaces the AWS default allow-all outbound. RDS needs none.
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 127.0.0.1/32
+          Description: No outbound; deny-all by scope (explicit for F1000).
       Tags:
         - {Key: Name, Value: !Sub "taxcalc-${EnvName}-db-sg-sai"}
         - {Key: Env, Value: !Ref EnvName}
@@ -118,11 +129,16 @@ Resources:
 
   # --- The RDS instance. Stateful: Retain on BOTH policies.
   # Master credentials come from the out-of-band Secrets Manager
-  # secret via dynamic reference — never a CFN Parameter.
+      # secret via dynamic reference -- never a CFN Parameter.
   DbInstance:
     Type: AWS::RDS::DBInstance
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Stable DBInstanceIdentifier required for ops and Secrets Manager attachment (_sai suffix).
     Properties:
       DBInstanceIdentifier: !Sub "taxcalc-${EnvName}-sai"
       Engine: postgres

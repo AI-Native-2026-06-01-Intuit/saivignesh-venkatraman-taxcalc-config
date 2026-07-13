@@ -26,6 +26,11 @@ Resources:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: Access logging deferred for training artefact bucket; PAB + KMS + deny-non-TLS already enforced.
     Properties:
       # AccountId disambiguates across cohorts; -sai matches other stacks.
       BucketName: !Sub "uptimecrew-taxcalc-artifacts-${EnvName}-sai-${AWS::AccountId}"
@@ -96,7 +101,7 @@ Resources:
                 "s3:x-amz-server-side-encryption": aws:kms
 
 Outputs:
-  # Deploy as taxcalc-artifacts-dev-sai → taxcalc-artifacts-dev-sai-BucketName / BucketArn.
+  # Deploy as taxcalc-artifacts-dev-sai -> taxcalc-artifacts-dev-sai-BucketName / BucketArn.
   ArtefactBucketName:
     Value: !Ref TaxcalcArtifactsBucket
     Export: {Name: !Sub "${AWS::StackName}-BucketName"}
