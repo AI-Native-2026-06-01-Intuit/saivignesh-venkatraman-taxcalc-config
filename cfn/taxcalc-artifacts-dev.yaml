@@ -20,7 +20,7 @@ Parameters:
     Type: String
     Default: dev
     AllowedValues: [dev, staging, prod]
-
+    Description: The environment name.
 Resources:
   TaxcalcArtifactsBucket:
     Type: AWS::S3::Bucket

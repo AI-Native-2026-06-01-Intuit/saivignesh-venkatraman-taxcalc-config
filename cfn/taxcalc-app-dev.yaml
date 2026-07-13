@@ -31,6 +31,7 @@ Parameters:
     Type: String
     Default: dev
     AllowedValues: [dev, staging, prod]
+    Description: The environment name.
   NetworkStackName:
     Type: String
     Default: taxcalc-network-dev-sai
@@ -39,13 +40,13 @@ Parameters:
     Type: String
     Default: db.t4g.small
     AllowedValues: [db.t4g.small, db.t4g.medium, db.m6g.large]
+    Description: The class of the RDS instance.
   DbMasterSecretName:
     Type: String
     Default: taxcalc/dev/db-master
     Description: >
       Out-of-band Secrets Manager secret name (one-time per env).
       Must contain SecretString keys username and password.
-
 Resources:
   # --- DB subnet group spanning the private subnets imported from
   # the network stack. !Split + !ImportValue avoids hardcoded subnet IDs.
