@@ -24,7 +24,7 @@ permissions:
 jobs:
   validate:
     name: cfn-lint + cfn-nag + aws validate-template
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, aws]
     timeout-minutes: 10
     steps:
       - name: Check out config repo
