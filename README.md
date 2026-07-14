@@ -13,6 +13,9 @@ ECR image (shared `_sai` suffix):
 
 `043000359802.dkr.ecr.us-east-1.amazonaws.com/uptimecrew/taxcalc-api_sai`
 
+## W6D3 summary
+Scaffold the taxcalc-bootstrap-dev.yaml with IAM role scoped only to the config repo for the create describe execute change-set flow. Similarly, scaffolded the VPC related changes in cfn/taxcalc-network-dev.yaml. Suffixed all named resources with "-sai" to prevent conflicts with other capstone members' projects. Created the cfn-validate CI to ensure that the cloudformation CIs are properly linted and validated. 
+
 ## W6D2 summary
 
 Promoted W5D3 workload manifests from the app repo into a Kustomize `base/` plus `overlays/dev|staging|prod/`, wired Argo CD `AppProject taxcalc` (strict allow-list, no wildcards), a standalone dev `Application`, and a matrix `ApplicationSet` for all envs. Slack notifications route `team=taxcalc` apps to `taxcalc-deploys-sai` on sync-failed and health-degraded only. Platform-owned `ResourceQuota`/`LimitRange` and cluster-scoped `Namespace` objects are intentionally excluded from the app-team GitOps base.
@@ -34,23 +37,9 @@ argocd-system/                # Argo CD Notifications ConfigMap (no Secret commi
 
 Commits in this repo are split by concern: base manifests, env overlays, Argo CD project/apps, notifications, and docs — so each layer can be reviewed independently.
 
-## Namespace / bootstrap contract
-
-`CreateNamespace=true` is retained on Applications per W6D2 rubric. Because the AppProject intentionally keeps `clusterResourceWhitelist: []` to prevent app-managed cluster-scoped resources, the local k3d namespaces `taxcalc-dev`, `taxcalc-staging`, and `taxcalc-prod` are bootstrap-owned and pre-created out-of-band. Argo manages only the namespace-scoped application resources inside those destinations.
-
-Pre-create workload namespaces before the first sync (platform/bootstrap, not GitOps):
-
-```bash
-kubectl create namespace taxcalc-dev --dry-run=client -o yaml | kubectl apply -f -
-kubectl create namespace taxcalc-staging --dry-run=client -o yaml | kubectl apply -f -
-kubectl create namespace taxcalc-prod --dry-run=client -o yaml | kubectl apply -f -
-```
-
-Run `./check-gitops-config-ready.sh` to validate repo config; missing live namespaces warn only (local bootstrap prerequisite for sync evidence, not a merge blocker).
-
 ## W6D2 guardrails
 
-- **No Namespace object in base/overlays**: Namespace YAML is never committed here. `CreateNamespace=true` stays on Applications per rubric, but with `clusterResourceWhitelist: []` the target namespaces must already exist — bootstrap them out-of-band before sync evidence.
+- **No Namespace object in base**: Argo CD `CreateNamespace=true` creates `taxcalc-dev|staging|prod` at sync time. The AppProject keeps `clusterResourceWhitelist: []`, so cluster-scoped Namespace objects are not managed by the app team.
 - **No ResourceQuota / LimitRange in base**: `manifests/00-namespace.yaml` in the app repo bundles platform-owned quota/limit objects. Those are intentionally excluded from this GitOps base because the AppProject blacklists `ResourceQuota` and `LimitRange`.
 - **ServiceMonitor / PrometheusRule**: omitted from base for now because local k3d may lack Prometheus Operator CRDs. Kinds remain allowed in the AppProject for a later observability follow-up.
 - **Placeholder Secret only**: `base/40-taxcalc-api.secret.yaml` contains non-real placeholder values. Replace at deploy time via your secret manager or out-of-band `kubectl create secret`.
@@ -63,27 +52,6 @@ Overlays rewrite the base image `uptimecrew/taxcalc-api:0.1.1` to:
 `043000359802.dkr.ecr.us-east-1.amazonaws.com/uptimecrew/taxcalc-api_sai:37f63b8a3456abc3532086474abf53b0c55dd672`
 
 The app repo CI opens PRs that bump `overlays/dev/kustomization.yaml` via `_bump-config.yml` using secret `GITOPS_REPO_TOKEN_SAI`.
-
-## Private ECR image pull behavior
-
-The GitOps manifests reference `imagePullSecrets`:
-
-```yaml
-imagePullSecrets:
-  - name: ecr-pull-sai
-```
-
-The actual `ecr-pull-sai` Secret is intentionally not committed to Git. It is created out-of-band in each target namespace because ECR credentials are short-lived and sensitive.
-
-For local k3d / non-EKS clusters, run:
-
-```bash
-./scripts/bootstrap-ecr-pull-secret.sh
-```
-
-For EKS, the preferred production posture is node IAM or pod/node-level ECR pull permissions. The `imagePullSecret` path is used for local k3d and clusters without native ECR integration.
-
-If Zscaler or corp VPN intercepts TLS, you may see `x509: certificate signed by unknown authority` after auth succeeds. In that case, import the image into k3d (`k3d image import`) or configure the k3d node/containerd trust store for local evidence.
 
 ## Install tooling (local)
 
@@ -129,14 +97,6 @@ kubectl -n argocd label secret <cluster-secret-name> uptimecrew.example.internal
 ```
 
 ## Apply AppProject, dev Application, ApplicationSet
-
-Bootstrap workload namespaces first (see [Namespace / bootstrap contract](#namespace--bootstrap-contract)), then create the ECR pull secret (see [Private ECR image pull behavior](#private-ecr-image-pull-behavior)):
-
-```bash
-./scripts/bootstrap-ecr-pull-secret.sh
-```
-
-Apply Argo CD resources:
 
 ```bash
 kubectl -n argocd apply -f argocd/projects/taxcalc.yaml

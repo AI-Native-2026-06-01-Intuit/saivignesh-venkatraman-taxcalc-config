@@ -1,0 +1,110 @@
+# cfn/taxcalc-artifacts-dev.yaml
+# TASK 3 S3 artefact bucket -- holds W5 D4 SAM artefacts and Argo
+# CD config snapshots. Hardened defaults from day one. Both
+# DeletionPolicy: Retain AND UpdateReplacePolicy: Retain so that
+# neither a stack delete nor a property-change replacement ever
+# destroys live data.
+#
+# Deploy with the ChangeSet flow:
+  # aws cloudformation create-change-set \
+  #   --stack-name taxcalc-artifacts-dev-sai \
+  #   --change-set-name initial --change-set-type CREATE \
+  #   --template-body file://cfn/taxcalc-artifacts-dev.yaml \
+  #   --parameters ParameterKey=EnvName,ParameterValue=dev \
+  #   --region us-east-1
+AWSTemplateFormatVersion: "2010-09-09"
+Description: taxcalc artefact bucket (sai) -- KMS, PAB, lifecycle, deny-non-TLS.
+
+Parameters:
+  EnvName:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: The environment name.
+Resources:
+  TaxcalcArtifactsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: Access logging deferred for training artefact bucket; PAB + KMS + deny-non-TLS already enforced.
+    Properties:
+      # AccountId disambiguates across cohorts; -sai matches other stacks.
+      BucketName: !Sub "uptimecrew-taxcalc-artifacts-${EnvName}-sai-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: alias/aws/s3
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: tier-to-ia-then-glacier-ir
+            Status: Enabled
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 90
+              - StorageClass: GLACIER_IR
+                TransitionInDays: 365
+          - Id: expire-old-versions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      Tags:
+        - {Key: Name, Value: !Sub "uptimecrew-taxcalc-artifacts-${EnvName}-sai"}
+        - {Key: Env, Value: !Ref EnvName}
+        - {Key: Project, Value: taxcalc}
+        - {Key: trainee, Value: saivignesh-venkatraman}
+        - {Key: team, Value: capstone-team-5}
+        - {Key: environment, Value: training}
+
+  ArtefactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TaxcalcArtifactsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyNonTLS
+            Effect: Deny
+            Principal: "*"
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:ListBucket
+            Resource:
+              - !GetAtt TaxcalcArtifactsBucket.Arn
+              - !Sub "${TaxcalcArtifactsBucket.Arn}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+          - Sid: DenyUnencryptedPut
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub "${TaxcalcArtifactsBucket.Arn}/*"
+            Condition:
+              StringNotEquals:
+                "s3:x-amz-server-side-encryption": aws:kms
+
+Outputs:
+  # Deploy as taxcalc-artifacts-dev-sai -> taxcalc-artifacts-dev-sai-BucketName / BucketArn.
+  ArtefactBucketName:
+    Value: !Ref TaxcalcArtifactsBucket
+    Export: {Name: !Sub "${AWS::StackName}-BucketName"}
+  ArtefactBucketArn:
+    Value: !GetAtt TaxcalcArtifactsBucket.Arn
+    Export: {Name: !Sub "${AWS::StackName}-BucketArn"}

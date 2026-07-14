@@ -1,0 +1,187 @@
+# cfn/taxcalc-app-dev.yaml
+# TASK 3 application stack: an RDS PostgreSQL instance + DB SG,
+# consuming the network stack's exports via !ImportValue. The DB
+# master password is NEVER passed as a Parameter (NoEcho or not).
+# The Secrets Manager secret is created out-of-band (one-time per
+# env) and resolved at deploy time via
+# {{resolve:secretsmanager:...}} dynamic references.
+# Stateful resources carry BOTH DeletionPolicy: Retain AND
+# UpdateReplacePolicy: Retain.
+#
+# Deploy with the ChangeSet flow (requires network stack first):
+#   aws cloudformation create-change-set \
+#     --stack-name taxcalc-app-dev-sai \
+#     --change-set-name initial --change-set-type CREATE \
+#     --capabilities CAPABILITY_NAMED_IAM \
+#     --template-body file://cfn/taxcalc-app-dev.yaml \
+#     --parameters \
+#       ParameterKey=EnvName,ParameterValue=dev \
+#       ParameterKey=NetworkStackName,ParameterValue=taxcalc-network-dev-sai \
+#     --region us-east-1
+#
+# Pre-create the out-of-band secret once per env (example):
+#   aws secretsmanager create-secret \
+#     --name taxcalc/dev/db-master \
+#     --secret-string '{"username":"taxcalc_master","password":"<generated>"}'
+AWSTemplateFormatVersion: "2010-09-09"
+Description: taxcalc application stack (sai) -- RDS consuming network exports.
+
+Parameters:
+  EnvName:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: The environment name.
+  NetworkStackName:
+    Type: String
+    Default: taxcalc-network-dev-sai
+    Description: Name of the network stack whose exports we !ImportValue.
+  DbInstanceClass:
+    Type: String
+    Default: db.t4g.small
+    AllowedValues: [db.t4g.small, db.t4g.medium, db.m6g.large]
+    Description: The class of the RDS instance.
+  DbMasterSecretName:
+    Type: String
+    Default: taxcalc/dev/db-master
+    Description: >
+      Out-of-band Secrets Manager secret name (one-time per env).
+      Must contain SecretString keys username and password.
+Resources:
+  # --- DB subnet group spanning the private subnets imported from
+  # the network stack. !Split + !ImportValue avoids hardcoded subnet IDs.
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub "taxcalc ${EnvName} private subnets (sai)"
+      SubnetIds: !Split
+        - ","
+        - Fn::ImportValue: !Sub "${NetworkStackName}-PrivateSubnets"
+      Tags:
+        - {Key: Name, Value: !Sub "taxcalc-${EnvName}-db-subnet-group-sai"}
+        - {Key: Env, Value: !Ref EnvName}
+        - {Key: Project, Value: taxcalc}
+        - {Key: trainee, Value: saivignesh-venkatraman}
+        - {Key: team, Value: capstone-team-5}
+        - {Key: environment, Value: training}
+
+  # --- DB security group: ingress 5432 only from the app SG.
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Stable GroupName required for operational identification across envs (_sai suffix).
+    Properties:
+      GroupName: !Sub "taxcalc-${EnvName}-db-sg-sai"
+      GroupDescription: !Sub "taxcalc ${EnvName} DB SG (5432 from app SG only)."
+      VpcId:
+        Fn::ImportValue: !Sub "${NetworkStackName}-VpcId"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId:
+            Fn::ImportValue: !Sub "${NetworkStackName}-AppSgId"
+          Description: Postgres from app SG only.
+      # Explicit egress required (cfn-nag F1000). Specifying any egress
+      # replaces the AWS default allow-all outbound. RDS needs none.
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 127.0.0.1/32
+          Description: No outbound; deny-all by scope (explicit for F1000).
+      Tags:
+        - {Key: Name, Value: !Sub "taxcalc-${EnvName}-db-sg-sai"}
+        - {Key: Env, Value: !Ref EnvName}
+        - {Key: Project, Value: taxcalc}
+        - {Key: trainee, Value: saivignesh-venkatraman}
+        - {Key: team, Value: capstone-team-5}
+        - {Key: environment, Value: training}
+
+  # --- App SG egress 5432 -> DB SG (Task 2 deferred this cross-stack rule).
+  AppToDbEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId:
+        Fn::ImportValue: !Sub "${NetworkStackName}-AppSgId"
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      DestinationSecurityGroupId: !Ref DbSecurityGroup
+      Description: Postgres to DB SG only.
+
+  # --- Parameter group for Postgres 16 family.
+  DbParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Family: postgres16
+      Description: !Sub "taxcalc ${EnvName} postgres16 params (sai)"
+      Parameters:
+        log_min_duration_statement: "1000"
+      Tags:
+        - {Key: Name, Value: !Sub "taxcalc-${EnvName}-db-pg-sai"}
+        - {Key: Env, Value: !Ref EnvName}
+        - {Key: Project, Value: taxcalc}
+        - {Key: trainee, Value: saivignesh-venkatraman}
+        - {Key: team, Value: capstone-team-5}
+        - {Key: environment, Value: training}
+
+  # --- The RDS instance. Stateful: Retain on BOTH policies.
+  # Master credentials come from the out-of-band Secrets Manager
+      # secret via dynamic reference -- never a CFN Parameter.
+  DbInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Stable DBInstanceIdentifier required for ops and Secrets Manager attachment (_sai suffix).
+    Properties:
+      DBInstanceIdentifier: !Sub "taxcalc-${EnvName}-sai"
+      Engine: postgres
+      EngineVersion: "16.9"
+      DBInstanceClass: !Ref DbInstanceClass
+      AllocatedStorage: "20"
+      StorageType: gp3
+      StorageEncrypted: true
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      DBParameterGroupName: !Ref DbParameterGroup
+      VPCSecurityGroups: [!Ref DbSecurityGroup]
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 7
+      DeletionProtection: true
+      MasterUsername: !Sub "{{resolve:secretsmanager:${DbMasterSecretName}:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DbMasterSecretName}:SecretString:password}}"
+      Tags:
+        - {Key: Name, Value: !Sub "taxcalc-${EnvName}-db-sai"}
+        - {Key: Env, Value: !Ref EnvName}
+        - {Key: Project, Value: taxcalc}
+        - {Key: trainee, Value: saivignesh-venkatraman}
+        - {Key: team, Value: capstone-team-5}
+        - {Key: environment, Value: training}
+
+  # --- Attach the out-of-band secret to the live DB for rotation targeting.
+  SecretTargetAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Ref DbMasterSecretName
+      TargetId: !Ref DbInstance
+      TargetType: AWS::RDS::DBInstance
+
+Outputs:
+  # Deploy as stack taxcalc-app-dev-sai so exports become
+  # taxcalc-app-dev-sai-DbEndpoint / DbSecretArn / DbSecurityGroupId.
+  DbEndpoint:
+    Value: !GetAtt DbInstance.Endpoint.Address
+    Export: {Name: !Sub "${AWS::StackName}-DbEndpoint"}
+  DbSecretArn:
+    Description: Name (or later ARN) of the out-of-band Secrets Manager secret.
+    Value: !Ref DbMasterSecretName
+    Export: {Name: !Sub "${AWS::StackName}-DbSecretArn"}
+  DbSecurityGroupId:
+    Value: !Ref DbSecurityGroup
+    Export: {Name: !Sub "${AWS::StackName}-DbSecurityGroupId"}
