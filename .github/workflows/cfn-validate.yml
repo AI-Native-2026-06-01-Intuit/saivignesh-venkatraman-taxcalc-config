@@ -47,7 +47,12 @@ jobs:
       - run: gem install cfn-nag -v 0.8.10
 
       - name: cfn-lint (cfn-lint-serverless profile)
-        run: cfn-lint --include-checks cfn_lint_serverless.rules cfn/*.yaml
+        run: |
+          set -euo pipefail
+          for f in cfn/*.yaml; do
+            echo "== cfn-lint: $f =="
+            cfn-lint --include-checks cfn_lint_serverless.rules "$f"
+          done
 
       - name: cfn-nag
         run: cfn_nag_scan --input-path cfn --fail-on-warnings --output-format txt
