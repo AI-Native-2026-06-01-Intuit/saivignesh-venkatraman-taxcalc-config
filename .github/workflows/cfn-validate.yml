@@ -47,7 +47,7 @@ jobs:
       - run: gem install cfn-nag -v 0.8.10
 
       - name: cfn-lint (cfn-lint-serverless profile)
-        run: cfn-lint -a cfn_lint_serverless.rules cfn/*.yaml
+        run: cfn-lint --include-checks cfn_lint_serverless.rules cfn/*.yaml
 
       - name: cfn-nag
         run: cfn_nag_scan --input-path cfn --fail-on-warnings --output-format txt
