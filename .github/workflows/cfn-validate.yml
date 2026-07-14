@@ -30,6 +30,9 @@ jobs:
       - name: Check out config repo
         uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4.1.7
 
+      - name: Install system dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y build-essential libyaml-dev
+
       - name: Set up Python (for cfn-lint + cfn-lint-serverless)
         uses: actions/setup-python@39cd14951b08e74b54015e9e001cdefcf80e669f # v5.1.1
         with:
