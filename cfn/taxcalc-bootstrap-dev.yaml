@@ -118,6 +118,8 @@ Resources:
         rules_to_suppress:
           - id: W28
             reason: Stable RoleName taxcalc-api-cfn-deploy-sai required for GHA OIDC role-to-assume ARN.
+          - id: W11
+            reason: cloudformation:ValidateTemplate is a schema-only API with no resource-level auth; AWS requires Resource "*".
     Properties:
       RoleName: taxcalc-api-cfn-deploy-sai
       AssumeRolePolicyDocument:
