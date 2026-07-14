@@ -51,7 +51,7 @@ jobs:
           set -euo pipefail
           for f in cfn/*.yaml; do
             echo "== cfn-lint: $f =="
-            cfn-lint --include-checks cfn_lint_serverless.rules "$f"
+            cfn-lint -a cfn_lint_serverless.rules -- "$f"
           done
 
       - name: cfn-nag
