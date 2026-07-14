@@ -153,13 +153,16 @@ Resources:
                   - cloudformation:DescribeStackEvents
                   - cloudformation:DescribeStackResources
                   - cloudformation:GetTemplate
-                  - cloudformation:ValidateTemplate
                   - cloudformation:DetectStackDrift
                   - cloudformation:DescribeStackDriftDetectionStatus
                   - cloudformation:DescribeStackResourceDrifts
                 Resource:
                   - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/taxcalc-*"
                   - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:changeSet/taxcalc-*"
+              - Sid: CfnValidateTemplate
+                Effect: Allow
+                Action: cloudformation:ValidateTemplate
+                Resource: "*"
               # S3 read on the bootstrap bucket (for stored templates).
               - Sid: BootstrapBucketRead
                 Effect: Allow
