@@ -13,6 +13,11 @@ ECR image (shared `_sai` suffix):
 
 `043000359802.dkr.ecr.us-east-1.amazonaws.com/uptimecrew/taxcalc-api_sai`
 
+## W6D4 summary
+Setup another cloudformation script that tracks the AWS managed cost. Treat missing data as breaching. Notes:
+ 1. We are not using Bedrock, but using the API directly. 
+ 2. Since we are using the API provider directly, and not Bedrock, the budget knobs will not be used. Hence, they have been commented out. 
+
 ## W6D3 summary
 Scaffold the taxcalc-bootstrap-dev.yaml with IAM role scoped only to the config repo for the create describe execute change-set flow. Similarly, scaffolded the VPC related changes in cfn/taxcalc-network-dev.yaml. Suffixed all named resources with "-sai" to prevent conflicts with other capstone members' projects. Created the cfn-validate CI to ensure that the cloudformation CIs are properly linted and validated. 
 
