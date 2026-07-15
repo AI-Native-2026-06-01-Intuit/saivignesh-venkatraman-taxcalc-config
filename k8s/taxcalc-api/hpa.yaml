@@ -1,0 +1,59 @@
+# k8s/taxcalc-api/hpa.yaml
+#
+# Custom-metric HPA for Deployment/taxcalc-api.
+#
+# Why not CPU-only: the summarize path spends most of its wall time waiting
+# on the LLM provider API (Anthropic direct — not Bedrock). Pods can be
+# saturated on concurrency while CPU stays low, so a CPU HPA is blind to
+# that latency. Scaling on taxcalc_inflight_requests keeps queueing in-check
+# toward the page SLO of p99 ≤ 400 ms (see app-repo slo/SLO-TARGETS.md).
+#
+# Stabilisation: scale-up 30s (react to bursts), scale-down 600s (10 min) so a
+# brief dip does not pay a cold-start cycle (W5D3 callback).
+#
+# Wire-in only without a sandbox cluster — prometheus-adapter must expose
+# taxcalc_inflight_requests on the custom.metrics API for this to go Ready.
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: taxcalc-api-hpa
+  namespace: taxcalc-dev
+  labels:
+    app.kubernetes.io/name:       taxcalc-api
+    app.kubernetes.io/component:  autoscaling
+    app.kubernetes.io/part-of:    taxcalc
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: taxcalc-api
+  minReplicas: 2
+  maxReplicas: 25
+  metrics:
+    - type: Pods
+      pods:
+        metric:
+          name: taxcalc_inflight_requests
+        target:
+          type: AverageValue
+          averageValue: "6"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 4
+          periodSeconds: 15
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+      selectPolicy: Min

@@ -11,6 +11,12 @@
 # cfn/taxcalc-observability-dev.yaml. Until sandbox EKS OIDC is wired,
 # this is a wire-in; local k3d cannot assume the role.
 #
+# EVIDENCE GAP — X-Ray + Tempo side-by-side (same traceId during spike):
+# Rubric wants console screenshots proving reservoir 10/sec + 5% FixedRate
+# with matching traceIds in both tools. That requires a live EKS spike path
+# (ADOT dual-export + SamplingRule). No sandbox EKS → screenshots deferred;
+# document in draft_mr.md. Do not invent fake traceId evidence.
+#
 # App tip: OTEL_EXPORTER_OTLP_ENDPOINT=http://adot-collector.taxcalc-dev.svc.cluster.local:4317
 
 ---
