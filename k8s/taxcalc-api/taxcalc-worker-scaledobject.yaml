@@ -1,0 +1,61 @@
+# k8s/taxcalc-api/taxcalc-worker-scaledobject.yaml
+#
+# KEDA binds Deployment/taxcalc-worker to SQS depth on taxcalc-calc-jobs-dev-sai.
+# Auth is operator-owned IRSA: SQS GetQueueAttributes lives on the KEDA
+# operator role — never on every worker pod.
+#
+# Curriculum "identityOwner: operator" maps to the CRD enum value `keda`
+# (allowed: keda | workload). See TriggerAuthentication.spec.podIdentity.
+#
+# Downstream (separate deliverables): AWS::XRay::SamplingRule + ADOT
+# dual-exporter will scrape/export traces from this worker path; keep
+# scaleTargetRef.name == taxcalc-worker so sampling/service names align.
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: taxcalc-worker-sqs-trigger-auth
+  namespace: taxcalc-dev
+  labels:
+    app.kubernetes.io/name:       taxcalc-worker
+    app.kubernetes.io/component:  autoscaling
+    app.kubernetes.io/part-of:    taxcalc
+spec:
+  podIdentity:
+    provider: aws
+    # Operator-owned identity (curriculum: "operator") → KEDA enum `keda`.
+    # IRSA for sqs:GetQueueAttributes attaches to the KEDA operator SA, not
+    # the workload pods.
+    identityOwner: keda
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: taxcalc-worker
+  namespace: taxcalc-dev
+  labels:
+    app.kubernetes.io/name:       taxcalc-worker
+    app.kubernetes.io/component:  autoscaling
+    app.kubernetes.io/part-of:    taxcalc
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: taxcalc-worker
+  minReplicaCount: 0
+  maxReplicaCount: 20
+  pollingInterval: 30
+  cooldownPeriod: 300
+  triggers:
+    - type: aws-sqs-queue
+      authenticationRef:
+        name: taxcalc-worker-sqs-trigger-auth
+      metadata:
+        # Queue name is enough for the scaler when awsRegion is set; full URL
+        # also works: https://sqs.us-east-1.amazonaws.com/<account>/taxcalc-calc-jobs-dev-sai
+        # -sai suffix is mandatory on AWS names (shared account, avoid teammate collisions).
+        queueURL: taxcalc-calc-jobs-dev-sai
+        queueLength: "10"
+        awsRegion: us-east-1

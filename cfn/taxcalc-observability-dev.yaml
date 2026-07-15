@@ -1,0 +1,181 @@
+# cfn/taxcalc-observability-dev.yaml
+# Observability stack (W6D5):
+#   - AWS::XRay::SamplingRule — reservoir floor + fixed rate above it
+#   - IAM IRSA role for ADOT collector X-Ray PutSpans (PutTraceSegments)
+#
+# Sampling semantics (do not weaken):
+#   ReservoirSize: 10  → first 10 traces/sec ALWAYS captured (the floor)
+#   FixedRate:     0.05 → 5% of traffic ABOVE the reservoir
+#   NEVER FixedRate: 0  → zero fixed rate disables probabilistic sampling
+#                         and collapses visibility once the reservoir is
+#                         exhausted; keep >= 0.05 for this stack.
+#
+# Naming: every AWS resource name in this stack ends with -sai (RoleName,
+# RuleName, stack name, exports) to avoid collisions with teammates.
+#
+# ADOT (k8s/taxcalc-api/adot-collector.yaml in this repo) dual-exports OTLP to
+# Tempo + X-Ray; app never imports an X-Ray SDK. This role is assumed via
+# IRSA by SA taxcalc-dev/adot-collector.
+#
+# Deploy with the ChangeSet flow:
+#   aws cloudformation create-change-set \
+#     --stack-name taxcalc-observability-dev-sai \
+#     --change-set-name initial --change-set-type CREATE \
+#     --template-body file://cfn/taxcalc-observability-dev.yaml \
+#     --parameters ParameterKey=EnvName,ParameterValue=dev \
+#     --capabilities CAPABILITY_NAMED_IAM \
+#     --region us-east-1
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  taxcalc observability (sai) — X-Ray SamplingRule + ADOT X-Ray PutSpans IRSA role.
+
+Parameters:
+  EnvName:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Deployment environment.
+  # Matching fields for the rule. Wildcards keep ADOT / taxcalc-api /
+  # taxcalc-worker service names covered without a rule per workload.
+  ServiceName:
+    Type: String
+    Default: "*"
+    Description: X-Ray ServiceName match (OTel service.name). "*" = all taxcalc emitters in-account.
+  Priority:
+    Type: Number
+    Default: 1000
+    MinValue: 1
+    MaxValue: 9999
+    Description: >-
+      Lower = higher precedence. Must beat the X-Ray default rule (priority 10000).
+  # Leave blank until the platform publishes the shared EKS OIDC issuer.
+  # Trust policy is emitted only when both OIDC params are non-empty.
+  EksOidcProviderArn:
+    Type: String
+    Default: ""
+    Description: ARN of the shared capstone EKS OIDC provider (IRSA). Empty = role trust deferred.
+  EksOidcIssuerHost:
+    Type: String
+    Default: ""
+    Description: >-
+      Host path of the EKS OIDC issuer (after oidc-provider/, no https://).
+      Empty until the shared cluster issuer is published.
+
+Conditions:
+  HasEksOidc: !And
+    - !Not [!Equals [!Ref EksOidcProviderArn, ""]]
+    - !Not [!Equals [!Ref EksOidcIssuerHost, ""]]
+
+Resources:
+  TaxcalcSamplingRule:
+    Type: AWS::XRay::SamplingRule
+    Properties:
+      SamplingRule:
+        RuleName: !Sub "taxcalc-${EnvName}-sai"
+        # Version is create-only; do not change on updates.
+        Version: 1
+        Priority: !Ref Priority
+        # Floor: first 10 matching traces per second are always sampled.
+        ReservoirSize: 10
+        # Above the floor: sample 5% of remaining matching traffic.
+        # NEVER set to 0 — that drops probabilistic sampling after the
+        # reservoir is spent and starves X-Ray / ADOT dual-export of traces.
+        FixedRate: 0.05
+        ServiceName: !Ref ServiceName
+        ServiceType: "*"
+        Host: "*"
+        HTTPMethod: "*"
+        URLPath: "*"
+        ResourceARN: "*"
+      Tags:
+        - {Key: Env, Value: !Ref EnvName}
+        - {Key: Project, Value: taxcalc}
+        - {Key: trainee, Value: saivignesh-venkatraman}
+        - {Key: team, Value: capstone-team-5}
+        - {Key: environment, Value: training}
+        - {Key: feature, Value: observability}
+
+  # Curriculum "X-Ray PutSpans" role — IAM API is PutTraceSegments /
+  # PutTelemetryRecords (what ADOT awsxray exporter calls).
+  AdotXrayPutSpansRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Stable RoleName taxcalc-adot-xray-putspans-sai required for IRSA annotation on adot-collector SA.
+    Properties:
+      RoleName: taxcalc-adot-xray-putspans-sai
+      Description: >-
+        IRSA role for ADOT collector dual-exporter to PutTraceSegments into X-Ray.
+        App pods never hold this permission - only SA taxcalc-dev/adot-collector.
+      AssumeRolePolicyDocument: !If
+        - HasEksOidc
+        - Fn::Sub:
+            - |
+              {
+                "Version": "2012-10-17",
+                "Statement": [
+                  {
+                    "Effect": "Allow",
+                    "Principal": { "Federated": "${EksOidcProviderArn}" },
+                    "Action": "sts:AssumeRoleWithWebIdentity",
+                    "Condition": {
+                      "StringEquals": {
+                        "${EksOidcIssuerHost}:aud": "sts.amazonaws.com",
+                        "${EksOidcIssuerHost}:sub": "system:serviceaccount:taxcalc-dev:adot-collector"
+                      }
+                    }
+                  }
+                ]
+              }
+            - EksOidcProviderArn: !Ref EksOidcProviderArn
+              EksOidcIssuerHost: !Ref EksOidcIssuerHost
+        # Placeholder trust until EKS OIDC params are set — role exists for
+        # ARN stability / SA annotation; cannot be assumed yet.
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: DenyAllUntilOidcWired
+              Effect: Deny
+              Principal: { AWS: "*" }
+              Action: sts:AssumeRole
+      Policies:
+        - PolicyName: xray-putspans-sai
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: PutSpansViaXRayApi
+                Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: "*"
+      Tags:
+        - {Key: Env, Value: !Ref EnvName}
+        - {Key: Project, Value: taxcalc}
+        - {Key: trainee, Value: saivignesh-venkatraman}
+        - {Key: team, Value: capstone-team-5}
+        - {Key: environment, Value: training}
+        - {Key: feature, Value: observability}
+
+Outputs:
+  SamplingRuleArn:
+    Description: ARN of the taxcalc X-Ray sampling rule.
+    Value: !GetAtt TaxcalcSamplingRule.RuleARN
+    Export:
+      Name: !Sub "taxcalc-observability-${EnvName}-sai-SamplingRuleArn"
+  SamplingRuleName:
+    Description: Name of the taxcalc X-Ray sampling rule.
+    Value: !Sub "taxcalc-${EnvName}-sai"
+    Export:
+      Name: !Sub "taxcalc-observability-${EnvName}-sai-SamplingRuleName"
+  SamplingContract:
+    Description: Human-readable sampling contract (reservoir + fixed rate).
+    Value: "ReservoirSize=10 (always/sec); FixedRate=0.05 (never 0)"
+  AdotXrayPutSpansRoleArn:
+    Description: IRSA role ARN for adot-collector ServiceAccount (eks.amazonaws.com/role-arn).
+    Value: !GetAtt AdotXrayPutSpansRole.Arn
+    Export:
+      Name: !Sub "taxcalc-observability-${EnvName}-sai-AdotXrayPutSpansRoleArn"

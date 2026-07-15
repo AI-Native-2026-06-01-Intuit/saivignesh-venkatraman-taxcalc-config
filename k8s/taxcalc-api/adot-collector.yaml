@@ -1,0 +1,174 @@
+# k8s/taxcalc-api/adot-collector.yaml
+#
+# ADOT collector dual-export: app → OTLP → ADOT → Tempo (in-cluster) AND
+# X-Ray (AWS). Application code stays on OpenTelemetry only — never imports
+# an AWS X-Ray SDK. The awsxray exporter translates OTLP spans → X-Ray
+# segments (PutTraceSegments / PutTelemetryRecords), which is the curriculum
+# "PutSpans" role surface.
+#
+# IRSA: ServiceAccount annotation assumes taxcalc-adot-xray-putspans-sai
+# (-sai suffix required on all AWS names). See
+# cfn/taxcalc-observability-dev.yaml. Until sandbox EKS OIDC is wired,
+# this is a wire-in; local k3d cannot assume the role.
+#
+# App tip: OTEL_EXPORTER_OTLP_ENDPOINT=http://adot-collector.taxcalc-dev.svc.cluster.local:4317
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: adot-collector
+  namespace: taxcalc-dev
+  labels:
+    app.kubernetes.io/name:       adot-collector
+    app.kubernetes.io/component:  observability
+    app.kubernetes.io/part-of:    taxcalc
+  annotations:
+    # IRSA — X-Ray PutSpans role (CFN RoleName taxcalc-adot-xray-putspans-sai).
+    # Replace ACCOUNT once if the training account id differs.
+    eks.amazonaws.com/role-arn: arn:aws:iam::043000359802:role/taxcalc-adot-xray-putspans-sai
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: adot-collector-config
+  namespace: taxcalc-dev
+  labels:
+    app.kubernetes.io/name:       adot-collector
+    app.kubernetes.io/component:  observability
+    app.kubernetes.io/part-of:    taxcalc
+data:
+  config.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 400
+        spike_limit_mib: 100
+      batch:
+        timeout: 1s
+        send_batch_size: 50
+
+    exporters:
+      # In-cluster Tempo (OTLP gRPC).
+      otlp/tempo:
+        endpoint: tempo.monitoring.svc.cluster.local:4317
+        tls:
+          insecure: true
+      # AWS X-Ray — uses IRSA credentials from this pod's service account.
+      # No X-Ray SDK in app code; ADOT owns the AWS API call.
+      awsxray:
+        region: us-east-1
+        indexed_attributes:
+          - service.name
+          - http.method
+          - http.status_code
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          # Dual-export: one receive → Tempo AND X-Ray.
+          exporters: [otlp/tempo, awsxray]
+      telemetry:
+        logs:
+          level: info
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: adot-collector
+  namespace: taxcalc-dev
+  labels:
+    app.kubernetes.io/name:       adot-collector
+    app.kubernetes.io/component:  observability
+    app.kubernetes.io/part-of:    taxcalc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: adot-collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name:       adot-collector
+        app.kubernetes.io/component:  observability
+        app.kubernetes.io/part-of:    taxcalc
+    spec:
+      serviceAccountName: adot-collector
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+      containers:
+        - name: adot-collector
+          image: public.ecr.aws/aws-observability/aws-otel-collector:v0.49.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config=/conf/config.yaml
+          ports:
+            - { name: otlp-grpc, containerPort: 4317 }
+            - { name: otlp-http, containerPort: 4318 }
+            - { name: health,    containerPort: 13133 }
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+              readOnly: true
+          env:
+            - name: AWS_REGION
+              value: us-east-1
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   {              memory: 512Mi }
+          livenessProbe:
+            httpGet: { path: /, port: health }
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /, port: health }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: config
+          configMap:
+            name: adot-collector-config
+            items:
+              - key: config.yaml
+                path: config.yaml
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: adot-collector
+  namespace: taxcalc-dev
+  labels:
+    app.kubernetes.io/name:       adot-collector
+    app.kubernetes.io/component:  observability
+    app.kubernetes.io/part-of:    taxcalc
+spec:
+  selector:
+    app.kubernetes.io/name: adot-collector
+  ports:
+    - { name: otlp-grpc, port: 4317, targetPort: otlp-grpc }
+    - { name: otlp-http, port: 4318, targetPort: otlp-http }
+    - { name: health,    port: 13133, targetPort: health }
