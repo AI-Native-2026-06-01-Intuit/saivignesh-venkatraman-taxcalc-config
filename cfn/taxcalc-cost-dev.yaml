@@ -2,18 +2,29 @@
 # Cost-control stack (W6D4 active path):
 #   - Secrets Manager placeholder for a direct LLM provider API key
 #   - cost alarm SNS topic
-#   - CloudWatch cost-per-request alarm (app/proxy EMF CostUsd)
+#   - CloudWatch cost-per-request alarm (Taxcalc/LlmCost CostUSD EMF)
+#   - AWS Budget notifications (forecasted 80% + actual 100% SNS)
 #   - CUR destination S3 bucket
-#   (AWS Budget notifications commented out -- no budgets:ModifyBudget in sandbox)#
+#
 # Direct API provider (default anthropic), not Bedrock. SNS channel
 # subscribers (Slack Lambda, PagerDuty) live in separate stacks.
+#
+# Naming: all explicit AWS resource names use the -sai trainee suffix
+# (TopicName, AlarmName, BudgetName, Secret Name, BucketName, CFN service role).
+#
+# Workarounds (capstone constraints):
+#   - No trainee budgets:* → deploy/update with --role-arn taxcalc-cost-cfn-service-sai
+#   - No live cluster / EMF→CW path → alarm evidence is TreatMissingData:breaching only
+#   - Direct Anthropic API (not Bedrock) → Bedrock IRSA/BudgetsAction stay commented;
+#     hard spend stop is app-side, not IAM deny
 #
 # Deploy with the ChangeSet flow:
 #   aws cloudformation create-change-set \
 #     --stack-name taxcalc-cost-dev-sai \
-#     --change-set-name initial --change-set-type CREATE \
+#     --change-set-name add-budget --change-set-type UPDATE \
 #     --template-body file://cfn/taxcalc-cost-dev.yaml \
 #     --parameters ParameterKey=EnvName,ParameterValue=dev \
+#     --role-arn arn:aws:iam::043000359802:role/taxcalc-cost-cfn-service-sai \
 #     --region us-east-1
 AWSTemplateFormatVersion: "2010-09-09"
 Description: taxcalc cost controls (sai) -- direct LLM provider secret + budget SNS + CW alarm + CUR.
@@ -24,13 +35,12 @@ Parameters:
     Default: dev
     AllowedValues: [dev, staging, prod]
     Description: Deployment environment.
-  # MonthlyBudgetUsd -- unused while MonthlyCostBudget is commented out (W2001).
-  # MonthlyBudgetUsd:
-  #   Type: Number
-  #   Default: 3500
-  #   MinValue: 100
-  #   MaxValue: 100000
-  #   Description: Monthly COST budget limit in USD (AWS Budgets).
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 3500
+    MinValue: 100
+    MaxValue: 100000
+    Description: Monthly COST budget limit in USD (AWS Budgets).
   LlmProvider:
     Type: String
     Default: anthropic
@@ -198,21 +208,21 @@ Resources:
               Bool:
                 "aws:SecureTransport": "false"
 
-  # --- Per-request cost alarm. Metric is emitted by the app/proxy via EMF
-  # (acme/llmproxy CostUsd), not from Bedrock. Missing datapoints are
-  # treated as breaching so a silent emitter cannot hide spend spikes.
+  # --- Per-request cost alarm. Metric is emitted by taxcalc-api via EMF
+  # (Taxcalc/LlmCost CostUSD). Missing datapoints are treated as breaching
+  # so a silent emitter cannot hide spend spikes.
   CostPerRequestAlarm:
     Type: AWS::CloudWatch::Alarm
     Metadata:
       cfn_nag:
         rules_to_suppress:
           - id: W28
-            reason: Stable AlarmName taxcalc/cost-per-request-<EnvName> required for runbooks and SNS alarm contract.
+            reason: Stable AlarmName taxcalc/cost-per-request-<EnvName>-sai required for runbooks and SNS alarm contract.
     Properties:
-      AlarmName: !Sub "taxcalc/cost-per-request-${EnvName}"
+      AlarmName: !Sub "taxcalc/cost-per-request-${EnvName}-sai"
       AlarmDescription: >-
-        AVG(CostUsd) EMF metric for service=taxcalc feature=explain-liability
-        exceeds $0.005 per request over 3 consecutive periods.
+        AVG(CostUSD) EMF metric for service=taxcalc-api tenant=shared
+        feature=llm.summarize exceeds $0.005 per request over 3 consecutive periods.
       EvaluationPeriods: 3
       DatapointsToAlarm: 3
       Threshold: 0.005
@@ -230,13 +240,15 @@ Resources:
           Label: AvgCostUsdPerRequest
           MetricStat:
             Metric:
-              Namespace: acme/llmproxy
-              MetricName: CostUsd
+              Namespace: Taxcalc/LlmCost
+              MetricName: CostUSD
               Dimensions:
                 - Name: service
-                  Value: taxcalc
+                  Value: taxcalc-api
+                - Name: tenant
+                  Value: shared
                 - Name: feature
-                  Value: explain-liability
+                  Value: llm.summarize
             Period: 60
             Stat: Average
       Tags:
@@ -246,46 +258,51 @@ Resources:
         - {Key: team, Value: capstone-team-5}
         - {Key: environment, Value: training}
 
-  # --- AWS Budget: commented out -- requires budgets:ModifyBudget which is
-  # not granted in the sandbox, and Anthropic direct-API spend does not
-  # appear on the AWS bill so the budget would not guard LLM costs anyway.
-  # MonthlyCostBudget:
-  #   Type: AWS::Budgets::Budget
-  #   Properties:
-  #     Budget:
-  #       BudgetName: !Sub "taxcalc-monthly-cost-${EnvName}-sai"
-  #       BudgetType: COST
-  #       TimeUnit: MONTHLY
-  #       BudgetLimit:
-  #         Amount: !Ref MonthlyBudgetUsd
-  #         Unit: USD
-  #       CostFilters:
-  #         TagKeyValue:
-  #           - "user:service$taxcalc"
-  #           - !Join ["", ["user:env$", !Ref EnvName]]
-  #     NotificationsWithSubscribers:
-  #       - Notification:
-  #           NotificationType: FORECASTED
-  #           ComparisonOperator: GREATER_THAN
-  #           Threshold: 80
-  #           ThresholdType: PERCENTAGE
-  #         Subscribers:
-  #           - SubscriptionType: SNS
-  #             Address: !Ref CostAlarmsTopic
-  #       - Notification:
-  #           NotificationType: ACTUAL
-  #           ComparisonOperator: GREATER_THAN
-  #           Threshold: 100
-  #           ThresholdType: PERCENTAGE
-  #         Subscribers:
-  #           - SubscriptionType: SNS
-  #             Address: !Ref CostAlarmsTopic
-  #     ResourceTags:
-  #       - {Key: Env, Value: !Ref EnvName}
-  #       - {Key: Project, Value: taxcalc}
-  #       - {Key: trainee, Value: saivignesh-venkatraman}
-  #       - {Key: team, Value: capstone-team-5}
-  #       - {Key: environment, Value: training}
+  # --- AWS Budget: alert-only for AWS-side spend + cost telemetry.
+  # Trainee IAM lacks budgets:ModifyBudget -- deploy/update this stack with
+  # --role-arn taxcalc-cost-cfn-service-sai so CloudFormation creates the budget.
+  # IAM still cannot stop Anthropic/Gemini spend; hard stop remains app-side.
+  MonthlyCostBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        # taxcalc-monthly-cost-dev (-sai for account-unique name)
+        BudgetName: !Sub "taxcalc-monthly-cost-${EnvName}-sai"
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUsd
+          Unit: USD
+        # AWS Budgets tag filter syntax: user:<tag>$<value>
+        CostFilters:
+          TagKeyValue:
+            - "user:service$taxcalc"
+            - !Join ["", ["user:env$", !Ref EnvName]]
+      NotificationsWithSubscribers:
+        # Forecasted 80% -- early warning via SNS only.
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref CostAlarmsTopic
+        # Actual 100% -- SNS notify. Hard stop is app-side (not IAM deny).
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref CostAlarmsTopic
+      ResourceTags:
+        - {Key: Env, Value: !Ref EnvName}
+        - {Key: Project, Value: taxcalc}
+        - {Key: trainee, Value: saivignesh-venkatraman}
+        - {Key: team, Value: capstone-team-5}
+        - {Key: environment, Value: training}
 
   # ---------------------------------------------------------------------------
   # LEGACY BEDROCK PATH -- COMMENTED OUT PER EM OVERRIDE
@@ -458,17 +475,16 @@ Outputs:
     Export: {Name: !Sub "${AWS::StackName}-LlmProviderApiKeySecretArn"}
   LlmProviderApiKeySecretName:
     Description: Name of the Secrets Manager placeholder (real key set out-of-band).
-    Value: !Sub "taxcalc/${EnvName}/llm-provider-api-key"
+    Value: !Sub "taxcalc/${EnvName}/llm-provider-api-key-sai"
     Export: {Name: !Sub "${AWS::StackName}-LlmProviderApiKeySecretName"}
   CostAlarmsTopicArn:
     Description: SNS topic ARN for budget/cost alarm subscribers (channels in other stacks).
     Value: !Ref CostAlarmsTopic
     Export: {Name: !Sub "${AWS::StackName}-CostAlarmsTopicArn"}
-  # MonthlyBudgetName -- unused while MonthlyCostBudget is commented out.
-  # MonthlyBudgetName:
-  #   Description: AWS Budgets name for the monthly COST limit.
-  #   Value: !Sub "taxcalc-monthly-cost-${EnvName}-sai"
-  #   Export: {Name: !Sub "${AWS::StackName}-MonthlyBudgetName"}
+  MonthlyBudgetName:
+    Description: AWS Budgets name for the monthly COST limit.
+    Value: !Sub "taxcalc-monthly-cost-${EnvName}-sai"
+    Export: {Name: !Sub "${AWS::StackName}-MonthlyBudgetName"}
   CurBucketName:
     Description: S3 bucket name for Cost and Usage Report delivery.
     Value: !Ref CurDestinationBucket
