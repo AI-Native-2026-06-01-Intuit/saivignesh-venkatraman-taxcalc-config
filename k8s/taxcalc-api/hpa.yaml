@@ -1,15 +1,13 @@
 # k8s/taxcalc-api/hpa.yaml
 #
 # Custom-metric HPA for Deployment/taxcalc-api.
+# YAML annotated: every metric Scaler and behavior policy explained inline.
 #
 # Why not CPU-only: the summarize path spends most of its wall time waiting
 # on the LLM provider API (Anthropic direct — not Bedrock). Pods can be
 # saturated on concurrency while CPU stays low, so a CPU HPA is blind to
 # that latency. Scaling on taxcalc_inflight_requests keeps queueing in-check
 # toward the page SLO of p99 ≤ 400 ms (see app-repo slo/SLO-TARGETS.md).
-#
-# Stabilisation: scale-up 30s (react to bursts), scale-down 600s (10 min) so a
-# brief dip does not pay a cold-start cycle (W5D3 callback).
 #
 # Wire-in only without a sandbox cluster — prometheus-adapter must expose
 # taxcalc_inflight_requests on the custom.metrics API for this to go Ready.
@@ -25,35 +23,68 @@ metadata:
     app.kubernetes.io/component:  autoscaling
     app.kubernetes.io/part-of:    taxcalc
 spec:
+  # --- Scale target
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
     name: taxcalc-api
+
+  # --- Scaler bounds
+  # minReplicas=2 → never drop below two pods (matches PDB minAvailable: 2).
   minReplicas: 2
+  # maxReplicas=25 → hard cap; Karpenter NodePool limits must bound the nodes
+  #                  behind this so HPA cannot imply unbounded EC2 spend.
   maxReplicas: 25
+
   metrics:
+    # =====================================================================
+    # SCALER 1 of 1 — Pods metric: taxcalc_inflight_requests
+    # Type Pods → average the metric across ready pods, then compare to
+    # averageValue. Desired replicas ≈ ceil(sum(metric) / averageValue),
+    # clamped to [minReplicas, maxReplicas].
+    # =====================================================================
     - type: Pods
       pods:
         metric:
+          # Custom metric from prometheus-adapter (app emits in-flight gauge).
+          # NOT CPU/memory — LLM wait time would leave those low while SLO burns.
           name: taxcalc_inflight_requests
         target:
+          # AverageValue="6" → aim for ~6 in-flight requests per pod before
+          # scale-out. Tune with p99 latency under load (SLO ≤ 400 ms).
           type: AverageValue
           averageValue: "6"
+
   behavior:
+    # --- Scale-up scaler policies (react to bursts)
     scaleUp:
+      # stabilizationWindowSeconds=30 → consider the max recommendation over
+      # the last 30s (dampen noise, still fast enough for LLM bursts).
       stabilizationWindowSeconds: 30
       policies:
+        # Policy A — Percent: at most double replicas every 15s (100%).
         - type: Percent
           value: 100
           periodSeconds: 15
+        # Policy B — Pods: at most +4 pods every 15s (absolute cap).
         - type: Pods
           value: 4
           periodSeconds: 15
+      # selectPolicy=Max → take the more aggressive of Percent vs Pods each
+      # window (whichever yields more replicas).
       selectPolicy: Max
+
+    # --- Scale-down scaler policies (avoid cold-start thrash)
     scaleDown:
+      # stabilizationWindowSeconds=600 → wait 10 min of sustained low load
+      # before scaling in (W5D3: brief dips must not pay a cold-start cycle).
       stabilizationWindowSeconds: 600
       policies:
+        # Policy A — Percent: remove at most 10% of replicas every 60s
+        # (slow bleed-down; pairs with long stabilization window).
         - type: Percent
           value: 10
           periodSeconds: 60
+      # selectPolicy=Min → with a single policy this is the only choice; kept
+      # explicit so adding a second policy later stays conservative.
       selectPolicy: Min
