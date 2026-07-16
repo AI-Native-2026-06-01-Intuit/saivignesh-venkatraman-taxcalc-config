@@ -1,36 +1,50 @@
+# Custom-metric HPA taxcalc-api-hpa for Deployment/taxcalc-api (sole HPA —
+# no CPU twin). Scales on taxcalc_inflight_requests so LLM wait time is
+# visible; CPU-only HPA was removed because two HPAs on the same Deployment
+# cause AmbiguousSelector and ScalingActive=False.
+#
+# Wire-in note: prometheus-adapter must expose taxcalc_inflight_requests on
+# the custom.metrics API for ScalingActive=True. Mirror lives at
+# k8s/taxcalc-api/hpa.yaml for kubectl apply -f k8s/taxcalc-api/.
+
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: taxcalc-api
+  name: taxcalc-api-hpa
+  labels:
+    app.kubernetes.io/name: taxcalc-api
+    app.kubernetes.io/component: autoscaling
+    app.kubernetes.io/part-of: taxcalc
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
     name: taxcalc-api
   minReplicas: 2
-  maxReplicas: 5
+  maxReplicas: 25
   metrics:
-    - type: Resource
-      resource:
-        name: cpu
+    - type: Pods
+      pods:
+        metric:
+          name: taxcalc_inflight_requests
         target:
-          type: Utilization
-          averageUtilization: 70
+          type: AverageValue
+          averageValue: "6"
   behavior:
     scaleUp:
-      stabilizationWindowSeconds: 0
+      stabilizationWindowSeconds: 30
       policies:
         - type: Percent
           value: 100
           periodSeconds: 15
         - type: Pods
-          value: 2
-          periodSeconds: 60
+          value: 4
+          periodSeconds: 15
       selectPolicy: Max
     scaleDown:
-      stabilizationWindowSeconds: 300
+      stabilizationWindowSeconds: 600
       policies:
         - type: Percent
-          value: 25
+          value: 10
           periodSeconds: 60
       selectPolicy: Min

@@ -1,0 +1,46 @@
+# k8s/observability/prometheus-adapter-values.yaml
+#
+# Exposes taxcalc_inflight_requests on custom.metrics.k8s.io for
+# HorizontalPodAutoscaler/taxcalc-api-hpa (Pods / AverageValue 6).
+#
+# Install (k3d):
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm upgrade --install prometheus-adapter prometheus-community/prometheus-adapter \
+#     -n monitoring -f k8s/observability/prometheus-adapter-values.yaml
+#
+# Series priority:
+#   1) App gauge taxcalc_inflight_requests (InflightRequestsFilter) — true
+#      in-flight count; needs image rebuild + ServiceMonitor scrape.
+#   2) rate(http_server_requests_seconds_count) — k3d stand-in so HPA can
+#      scale on fast GETs (Little's law: ~2ms latency never reaches avg 6
+#      concurrent). Use AverageValue≈40–50 rps/pod for a visible scale-up;
+#      keep git HPA at AverageValue 6 for the LLM-bound contract.
+
+prometheus:
+  url: http://kube-prometheus-stack-prometheus.monitoring.svc
+  port: 9090
+
+rules:
+  default: false
+  custom:
+    # Primary — app gauge (InflightRequestsFilter)
+    - seriesQuery: 'taxcalc_inflight_requests{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^taxcalc_inflight_requests$"
+        as: "taxcalc_inflight_requests"
+      metricsQuery: 'sum(<<.Series>>{<<.LabelMatchers>>}) by (<<.GroupBy>>)'
+
+    # k3d stand-in — request rate as taxcalc_inflight_requests
+    - seriesQuery: 'http_server_requests_seconds_count{namespace!="",pod!="",uri!="/actuator/prometheus"}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: ".*"
+        as: "taxcalc_inflight_requests"
+      metricsQuery: 'sum(rate(<<.Series>>{<<.LabelMatchers>>}[30s])) by (<<.GroupBy>>)'

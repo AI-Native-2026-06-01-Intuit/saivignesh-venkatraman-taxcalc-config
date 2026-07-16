@@ -1,0 +1,89 @@
+# k8s/taxcalc-api/taxcalc-worker-scaledobject.yaml
+#
+# KEDA ScaledObject + TriggerAuthentication for Deployment/taxcalc-worker.
+# YAML annotated: every Trigger / Scaler field explained inline below.
+#
+# Auth is operator-owned IRSA: SQS GetQueueAttributes lives on the KEDA
+# operator role — never on every worker pod.
+#
+# Curriculum "identityOwner: operator" maps to the CRD enum value `keda`
+# (allowed: keda | workload). See TriggerAuthentication.spec.podIdentity.
+#
+# Requires Deployment/taxcalc-worker (taxcalc-worker-deployment.yaml). Without
+# it Ready stays False ("taxcalc-worker not found") on k3d and EKS alike.
+# SQS IRSA (identityOwner: keda) still needs EKS for a live queue poll.
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: taxcalc-worker-sqs-trigger-auth
+  namespace: taxcalc-dev
+  labels:
+    app.kubernetes.io/name:       taxcalc-worker
+    app.kubernetes.io/component:  autoscaling
+    app.kubernetes.io/part-of:    taxcalc
+spec:
+  # --- Scaler auth (not a Trigger itself; referenced by triggers[].authenticationRef)
+  podIdentity:
+    # provider=aws → use EKS Pod Identity / IRSA for AWS API calls from the scaler.
+    provider: aws
+    # identityOwner=keda → IRSA attaches to the KEDA operator ServiceAccount
+    # (curriculum: "operator"), NOT to each taxcalc-worker pod. Keeps
+    # sqs:GetQueueAttributes off the workload blast radius.
+    identityOwner: keda
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: taxcalc-worker
+  namespace: taxcalc-dev
+  labels:
+    app.kubernetes.io/name:       taxcalc-worker
+    app.kubernetes.io/component:  autoscaling
+    app.kubernetes.io/part-of:    taxcalc
+spec:
+  # --- Scale target (what this ScaledObject drives)
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    # Must match the worker Deployment name so SQS depth scales the right pods.
+    name: taxcalc-worker
+
+  # --- Scaler bounds / cadence
+  # minReplicaCount=0 → scale-to-zero when the queue is empty (save cost; no
+  #                    idle workers burning CPU while jobs=0).
+  minReplicaCount: 0
+  # maxReplicaCount=20 → hard cap so a flood of SQS messages cannot mint an
+  #                     unbounded worker fleet (pairs with Karpenter limits).
+  maxReplicaCount: 20
+  # pollingInterval=30 → KEDA polls SQS ApproximateNumberOfMessages every 30s
+  #                     (Trigger evaluation cadence, not the queue's own poll).
+  pollingInterval: 30
+  # cooldownPeriod=300 → after scale-in decision, wait 300s before removing
+  #                     more pods (avoids thrash when depth oscillates near
+  #                     queueLength).
+  cooldownPeriod: 300
+
+  triggers:
+    # =====================================================================
+    # TRIGGER 1 of 1 — aws-sqs-queue scaler
+    # Scales taxcalc-worker replicas from SQS ApproximateNumberOfMessages.
+    # Formula (KEDA): desiredReplicas ≈ ceil(queueDepth / queueLength)
+    # clamped to [minReplicaCount, maxReplicaCount].
+    # =====================================================================
+    - type: aws-sqs-queue
+      # authenticationRef → TriggerAuthentication above (operator IRSA).
+      authenticationRef:
+        name: taxcalc-worker-sqs-trigger-auth
+      metadata:
+        # queueURL — queue name is enough when awsRegion is set; full URL also
+        # works: https://sqs.us-east-1.amazonaws.com/<account>/taxcalc-calc-jobs-dev-sai
+        # -sai suffix mandatory (shared account; avoid teammate collisions).
+        queueURL: taxcalc-calc-jobs-dev-sai
+        # queueLength="10" — target messages per replica. Example: depth=35
+        # → ~4 replicas (ceil(35/10)). Lower = more aggressive scale-out.
+        queueLength: "10"
+        # awsRegion — region for GetQueueAttributes (must match the queue).
+        awsRegion: us-east-1

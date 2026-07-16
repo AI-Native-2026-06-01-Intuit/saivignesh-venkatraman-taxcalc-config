@@ -1,0 +1,26 @@
+# k8s/taxcalc-api/pdb.yaml
+#
+# PodDisruptionBudget for Deployment/taxcalc-api.
+# minAvailable: 2 matches HPA minReplicas so simultaneous Spot reclaims (or
+# Karpenter consolidation drains) never floor the service below two ready
+# pods. Karpenter respects PDBs during consolidation.
+#
+# Wire-in: applies on any cluster with the policy/v1 API (including local
+# k3d). Live Spot reclaim protection only matters once pods run on a
+# Karpenter Spot NodePool (see k8s/karpenter/taxcalc-mixed.yaml).
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: taxcalc-api-pdb
+  namespace: taxcalc-dev
+  labels:
+    app.kubernetes.io/name:       taxcalc-api
+    app.kubernetes.io/component:  availability
+    app.kubernetes.io/part-of:    taxcalc
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taxcalc-api

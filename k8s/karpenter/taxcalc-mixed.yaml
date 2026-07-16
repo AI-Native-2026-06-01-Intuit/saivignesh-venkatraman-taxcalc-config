@@ -1,0 +1,96 @@
+# k8s/karpenter/taxcalc-mixed.yaml
+#
+# Karpenter NodePool taxcalc-mixed — Spot + on-demand (Spot preferred by the
+# Karpenter scheduler when both are allowed), Graviton families c7g | m7g.
+# Fleet caps (limits.cpu / limits.memory) bound spend so a runaway HPA cannot
+# mint an unbounded node fleet.
+#
+# REQUIRES an AWS EKS cluster with Karpenter installed. That cluster is NOT
+# present in this environment — this file is code-only / GitOps wire-in and
+# CANNOT be deployed live (kubectl apply will fail: no Karpenter CRDs, no
+# EKS subnets/SGs, no node IAM role). Do not treat a successful local dry-run
+# as evidence the pool is running.
+#
+# Discovery tag is a generic placeholder (REPLACE_WITH_EKS_CLUSTER_NAME), not
+# taxcalc-dev / taxcalc-dev-sai, so it is never confused with in-cluster
+# namespace or other k8s object names.
+#
+# When a real EKS + Karpenter sandbox exists: set karpenter.sh/discovery to
+# that cluster's discovery tag, ensure role taxcalc-karpenter-node-sai exists,
+# then apply. nodeClassRef.name must match the EC2NodeClass below.
+
+---
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: taxcalc-mixed
+  labels:
+    app.kubernetes.io/name:       taxcalc-mixed
+    app.kubernetes.io/component:  node-provisioning
+    app.kubernetes.io/part-of:    taxcalc
+spec:
+  # Generic placeholders — not a live cluster id / namespace name.
+  amiFamily: AL2023
+  role: taxcalc-karpenter-node-sai
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: REPLACE_WITH_EKS_CLUSTER_NAME
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: REPLACE_WITH_EKS_CLUSTER_NAME
+  tags:
+    Project: taxcalc
+    Env: dev
+    trainee: saivignesh-venkatraman
+    team: capstone-team-5
+    environment: training
+    Name: taxcalc-mixed-sai
+
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: taxcalc-mixed
+  labels:
+    app.kubernetes.io/name:       taxcalc-mixed
+    app.kubernetes.io/component:  node-provisioning
+    app.kubernetes.io/part-of:    taxcalc
+spec:
+  # Cap the fleet — HPA maxReplicas=25 must not imply unbounded EC2 spend.
+  limits:
+    cpu: "64"
+    memory: 128Gi
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: taxcalc
+        capacity-mix: spot-on-demand
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: taxcalc-mixed
+      requirements:
+        # Both allowed; Karpenter prefers Spot when price/availability win.
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot", "on-demand"]
+        - key: kubernetes.amazonaws.com/instance-family
+          operator: In
+          values: ["c7g", "m7g"]
+        - key: kubernetes.amazonaws.com/instance-cpu-manufacturer
+          operator: In
+          values: ["aws"]
+        - key: kubernetes.amazonaws.com/instance-arch
+          operator: In
+          values: ["arm64"]
+        - key: kubernetes.amazonaws.com/instance-category
+          operator: In
+          values: ["c", "m"]
+        - key: kubernetes.amazonaws.com/instance-generation
+          operator: Gt
+          values: ["6"]
+      expireAfter: 720h
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 1m
