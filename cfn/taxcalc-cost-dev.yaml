@@ -13,9 +13,9 @@
 # (TopicName, AlarmName, BudgetName, Secret Name, BucketName, CFN service role).
 #
 # Workarounds (capstone constraints):
-#   - No trainee budgets:* → deploy/update with --role-arn taxcalc-cost-cfn-service-sai
-#   - No live cluster / EMF→CW path → alarm evidence is TreatMissingData:breaching only
-#   - Direct Anthropic API (not Bedrock) → Bedrock IRSA/BudgetsAction stay commented;
+#   - No trainee budgets:* -> deploy/update with --role-arn taxcalc-cost-cfn-service-sai
+#   - No live cluster / EMF->CW path -> alarm evidence is TreatMissingData:breaching only
+#   - Direct Anthropic API (not Bedrock) -> Bedrock IRSA/BudgetsAction stay commented;
 #     hard spend stop is app-side, not IAM deny
 #
 # Deploy with the ChangeSet flow:

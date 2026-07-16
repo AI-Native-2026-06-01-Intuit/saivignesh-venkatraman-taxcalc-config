@@ -1,12 +1,12 @@
 # cfn/taxcalc-observability-dev.yaml
 # Observability stack (W6D5):
-#   - AWS::XRay::SamplingRule — reservoir floor + fixed rate above it
+#   - AWS::XRay::SamplingRule - reservoir floor + fixed rate above it
 #   - IAM IRSA role for ADOT collector X-Ray PutSpans (PutTraceSegments)
 #
 # Sampling semantics (do not weaken):
-#   ReservoirSize: 10  → first 10 traces/sec ALWAYS captured (the floor)
-#   FixedRate:     0.05 → 5% of traffic ABOVE the reservoir
-#   NEVER FixedRate: 0  → zero fixed rate disables probabilistic sampling
+#   ReservoirSize: 10  -> first 10 traces/sec ALWAYS captured (the floor)
+#   FixedRate:     0.05 -> 5% of traffic ABOVE the reservoir
+#   NEVER FixedRate: 0  -> zero fixed rate disables probabilistic sampling
 #                         and collapses visibility once the reservoir is
 #                         exhausted; keep >= 0.05 for this stack.
 #
@@ -27,7 +27,7 @@
 #     --region us-east-1
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  taxcalc observability (sai) — X-Ray SamplingRule + ADOT X-Ray PutSpans IRSA role.
+  taxcalc observability (sai) - X-Ray SamplingRule + ADOT X-Ray PutSpans IRSA role.
 
 Parameters:
   EnvName:
@@ -78,7 +78,7 @@ Resources:
         # Floor: first 10 matching traces per second are always sampled.
         ReservoirSize: 10
         # Above the floor: sample 5% of remaining matching traffic.
-        # NEVER set to 0 — that drops probabilistic sampling after the
+        # NEVER set to 0 - that drops probabilistic sampling after the
         # reservoir is spent and starves X-Ray / ADOT dual-export of traces.
         FixedRate: 0.05
         ServiceName: !Ref ServiceName
@@ -95,7 +95,7 @@ Resources:
         - {Key: environment, Value: training}
         - {Key: feature, Value: observability}
 
-  # Curriculum "X-Ray PutSpans" role — IAM API is PutTraceSegments /
+  # Curriculum "X-Ray PutSpans" role - IAM API is PutTraceSegments /
   # PutTelemetryRecords (what ADOT awsxray exporter calls).
   AdotXrayPutSpansRole:
     Type: AWS::IAM::Role
@@ -104,6 +104,12 @@ Resources:
         rules_to_suppress:
           - id: W28
             reason: Stable RoleName taxcalc-adot-xray-putspans-sai required for IRSA annotation on adot-collector SA.
+          - id: W11
+            reason: >-
+              xray:PutTraceSegments / PutTelemetryRecords / GetSamplingRules /
+              GetSamplingTargets do not support resource-level ARNs; AWS docs
+              require Resource "*". Scoped instead by IRSA trust to
+              SA taxcalc-dev/adot-collector only.
     Properties:
       RoleName: taxcalc-adot-xray-putspans-sai
       Description: >-
@@ -131,7 +137,7 @@ Resources:
               }
             - EksOidcProviderArn: !Ref EksOidcProviderArn
               EksOidcIssuerHost: !Ref EksOidcIssuerHost
-        # Placeholder trust until EKS OIDC params are set — role exists for
+        # Placeholder trust until EKS OIDC params are set - role exists for
         # ARN stability / SA annotation; cannot be assumed yet.
         - Version: "2012-10-17"
           Statement:
