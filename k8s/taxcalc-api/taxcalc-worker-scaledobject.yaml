@@ -9,7 +9,9 @@
 # Curriculum "identityOwner: operator" maps to the CRD enum value `keda`
 # (allowed: keda | workload). See TriggerAuthentication.spec.podIdentity.
 #
-# No live sandbox cluster — wire-in only. Apply when EKS + KEDA CRDs exist.
+# Requires Deployment/taxcalc-worker (taxcalc-worker-deployment.yaml). Without
+# it Ready stays False ("taxcalc-worker not found") on k3d and EKS alike.
+# SQS IRSA (identityOwner: keda) still needs EKS for a live queue poll.
 
 ---
 apiVersion: keda.sh/v1alpha1

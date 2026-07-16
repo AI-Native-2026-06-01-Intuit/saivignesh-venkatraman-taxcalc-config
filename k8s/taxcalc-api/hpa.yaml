@@ -3,6 +3,10 @@
 # Custom-metric HPA for Deployment/taxcalc-api.
 # YAML annotated: every metric Scaler and behavior policy explained inline.
 #
+# Sole HPA for Deployment/taxcalc-api — metadata.name MUST be `taxcalc-api-hpa`
+# (Task 2). Keep in sync with base/50-taxcalc-api.hpa.yaml. A second HPA on
+# this Deployment causes AmbiguousSelector / ScalingActive=False.
+#
 # Why not CPU-only: the summarize path spends most of its wall time waiting
 # on the LLM provider API (Anthropic direct — not Bedrock). Pods can be
 # saturated on concurrency while CPU stays low, so a CPU HPA is blind to
