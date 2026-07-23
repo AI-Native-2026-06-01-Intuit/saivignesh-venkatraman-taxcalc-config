@@ -10,7 +10,7 @@ images:
   # Sentinel tags — delivery automation must replace before enabling replicas.
   - name: uptimecrew/taxcalc-agent-svc
     newName: 043000359802.dkr.ecr.us-east-1.amazonaws.com/uptimecrew/taxcalc-agent-svc_sai
-    newTag: cfcd5ef595ce1af052b662554064b7762dbadf51-arm64
+    newTag: b3ee79dc588b474ad1325d402fd40fab7d81c4f3-arm64
   - name: uptimecrew/taxcalc-mcp-server
     newName: 043000359802.dkr.ecr.us-east-1.amazonaws.com/uptimecrew/taxcalc-mcp-server_sai
     newTag: 0.0.0-local-unpublished
