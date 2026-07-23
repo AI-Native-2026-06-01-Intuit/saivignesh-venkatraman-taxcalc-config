@@ -7,9 +7,24 @@ images:
   - name: uptimecrew/taxcalc-api
     newName: 043000359802.dkr.ecr.us-east-1.amazonaws.com/uptimecrew/taxcalc-api_sai
     newTag: 37f63b8a3456abc3532086474abf53b0c55dd672-arm64
+  - name: uptimecrew/taxcalc-agent-svc
+    newName: 043000359802.dkr.ecr.us-east-1.amazonaws.com/uptimecrew/taxcalc-agent-svc_sai
+    newTag: 0.0.0-local-unpublished
+  - name: uptimecrew/taxcalc-mcp-server
+    newName: 043000359802.dkr.ecr.us-east-1.amazonaws.com/uptimecrew/taxcalc-mcp-server_sai
+    newTag: 0.0.0-local-unpublished
+  - name: uptimecrew/taxcalc-web
+    newName: 043000359802.dkr.ecr.us-east-1.amazonaws.com/uptimecrew/taxcalc-web_sai
+    newTag: 0.0.0-local-unpublished
 replicas:
   - name: taxcalc-api
     count: 2
+  - name: taxcalc-agent-svc
+    count: 0
+  - name: taxcalc-mcp-server
+    count: 0
+  - name: taxcalc-web
+    count: 0
 patches:
   - path: patch-configmap.yaml
   - path: patch-ingress.yaml

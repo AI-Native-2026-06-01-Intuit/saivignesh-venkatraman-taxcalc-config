@@ -2,9 +2,17 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - 10-taxcalc-api-deployment.yaml
+  - 11-taxcalc-agent-svc-deployment.yaml
+  - 12-taxcalc-mcp-server-deployment.yaml
+  - 13-taxcalc-web-deployment.yaml
   - 20-taxcalc-api-service.yaml
+  - 21-taxcalc-agent-svc-service.yaml
+  - 22-taxcalc-mcp-server-service.yaml
+  - 23-taxcalc-web-service.yaml
   - 30-taxcalc-api.configmap.yaml
-  - 40-taxcalc-api.secret.yaml
+  - 31-taxcalc-agent-svc.configmap.yaml
+  - 32-taxcalc-mcp-server.configmap.yaml
+  - 33-taxcalc-web.configmap.yaml
   - 50-taxcalc-api.hpa.yaml
   - 60-taxcalc-api.ingress.yaml
   - 70-backing-services.yaml

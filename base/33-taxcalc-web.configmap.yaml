@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: taxcalc-web-config
+  labels:
+    app.kubernetes.io/name: taxcalc-web
+data:
+  TAXCALC_AGENT_PROXY: "true"
+  TAXCALC_AGENT_URL: http://taxcalc-agent-svc:8080

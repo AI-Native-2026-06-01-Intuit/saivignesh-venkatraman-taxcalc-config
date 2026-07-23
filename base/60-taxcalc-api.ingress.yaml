@@ -6,13 +6,21 @@ metadata:
     app.kubernetes.io/name: taxcalc-api
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "1m"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    # DRIFT(requirements): 30s default is insufficient for AI SDK v7 streaming chat.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
 spec:
   ingressClassName: nginx
   rules:
     - host: taxcalc.dev.uptimecrew.internal
       http:
         paths:
+          - path: /api/chat
+            pathType: Prefix
+            backend:
+              service:
+                name: taxcalc-web
+                port:
+                  number: 3001
           - path: /
             pathType: Prefix
             backend:
