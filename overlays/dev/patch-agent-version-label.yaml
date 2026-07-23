@@ -1,0 +1,10 @@
+# Keep app.kubernetes.io/version aligned with taxcalc-agent-svc images.newTag in this overlay.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taxcalc-agent-svc
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/version: b3ee79dc588b474ad1325d402fd40fab7d81c4f3-arm64
