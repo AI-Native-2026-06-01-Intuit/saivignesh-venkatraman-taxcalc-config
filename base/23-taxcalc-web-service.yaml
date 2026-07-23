@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: taxcalc-web
+  labels:
+    app.kubernetes.io/name: taxcalc-web
+    app.kubernetes.io/component: web
+    app.kubernetes.io/part-of: taxcalc
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: taxcalc-web
+  ports:
+    - name: http
+      port: 3001
+      targetPort: http

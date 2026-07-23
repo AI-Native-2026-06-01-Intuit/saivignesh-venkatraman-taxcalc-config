@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: taxcalc-mcp-server
+  labels:
+    app.kubernetes.io/name: taxcalc-mcp-server
+    app.kubernetes.io/component: mcp
+    app.kubernetes.io/part-of: taxcalc
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: taxcalc-mcp-server
+  ports:
+    - name: mcp
+      port: 8000
+      targetPort: mcp

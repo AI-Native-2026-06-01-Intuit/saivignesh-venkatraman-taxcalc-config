@@ -87,13 +87,17 @@ Resources:
         HTTPMethod: "*"
         URLPath: "*"
         ResourceARN: "*"
+      # Four mandatory cost-allocation tags (same contract as
+      # LlmProviderApiKeySecret in taxcalc-cost-dev.yaml). Activate in
+      # Billing → Cost allocation tags before Cost Explorer filters work.
       Tags:
-        - {Key: Env, Value: !Ref EnvName}
-        - {Key: Project, Value: taxcalc}
+        - {Key: service, Value: taxcalc}
+        - {Key: env, Value: !Ref EnvName}
+        - {Key: tenant, Value: shared}
+        - {Key: feature, Value: explain-liability}
         - {Key: trainee, Value: saivignesh-venkatraman}
         - {Key: team, Value: capstone-team-5}
         - {Key: environment, Value: training}
-        - {Key: feature, Value: observability}
 
   # Curriculum "X-Ray PutSpans" role - IAM API is PutTraceSegments /
   # PutTelemetryRecords (what ADOT awsxray exporter calls).
@@ -158,13 +162,15 @@ Resources:
                   - xray:GetSamplingRules
                   - xray:GetSamplingTargets
                 Resource: "*"
+      # Same four cost-allocation tags as TaxcalcSamplingRule / cost stack.
       Tags:
-        - {Key: Env, Value: !Ref EnvName}
-        - {Key: Project, Value: taxcalc}
+        - {Key: service, Value: taxcalc}
+        - {Key: env, Value: !Ref EnvName}
+        - {Key: tenant, Value: shared}
+        - {Key: feature, Value: explain-liability}
         - {Key: trainee, Value: saivignesh-venkatraman}
         - {Key: team, Value: capstone-team-5}
         - {Key: environment, Value: training}
-        - {Key: feature, Value: observability}
 
 Outputs:
   SamplingRuleArn:

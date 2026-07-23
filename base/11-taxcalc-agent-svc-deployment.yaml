@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taxcalc-agent-svc
+  labels:
+    app.kubernetes.io/name: taxcalc-agent-svc
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/part-of: taxcalc
+    app.kubernetes.io/managed-by: argocd
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taxcalc-agent-svc
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: taxcalc-agent-svc
+        app.kubernetes.io/component: agent
+        app.kubernetes.io/part-of: taxcalc
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+      imagePullSecrets:
+        - name: ecr-pull-sai
+      containers:
+        - name: taxcalc-agent-svc
+          # Sentinel tag — image-bump workflow must replace before enabling replicas.
+          image: uptimecrew/taxcalc-agent-svc:0.0.0-local-unpublished
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: taxcalc-agent-svc-config
+            - secretRef:
+                name: taxcalc-agent-svc-secrets
+          env:
+            - name: TAXCALC_AGENT_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: taxcalc-api-secrets
+                  key: spring.datasource.password
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3

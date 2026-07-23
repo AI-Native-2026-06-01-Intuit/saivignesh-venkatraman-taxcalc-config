@@ -6,3 +6,6 @@ draft_mr.md
 # Thumbs.db
 # .vscode/
 # *.swp
+
+# Cursor
+.cursor/

@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taxcalc-mcp-server
+  labels:
+    app.kubernetes.io/name: taxcalc-mcp-server
+    app.kubernetes.io/component: mcp
+    app.kubernetes.io/part-of: taxcalc
+    app.kubernetes.io/managed-by: argocd
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taxcalc-mcp-server
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: taxcalc-mcp-server
+        app.kubernetes.io/component: mcp
+        app.kubernetes.io/part-of: taxcalc
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+      imagePullSecrets:
+        - name: ecr-pull-sai
+      containers:
+        - name: taxcalc-mcp-server
+          # Sentinel tag — image-bump workflow must replace before enabling replicas.
+          image: uptimecrew/taxcalc-mcp-server:0.0.0-local-unpublished
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: mcp
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: taxcalc-mcp-server-config
+            - secretRef:
+                name: taxcalc-mcp-server-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          livenessProbe:
+            tcpSocket:
+              port: mcp
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: mcp
+            periodSeconds: 10

@@ -13,6 +13,11 @@ ECR image (shared `_sai` suffix):
 
 `043000359802.dkr.ecr.us-east-1.amazonaws.com/uptimecrew/taxcalc-api_sai`
 
+## W7D5 summary
+GitOps manifests for `taxcalc-agent-svc`, `taxcalc-mcp-server`, and `taxcalc-web` with zero-replica gates until images publish.
+Ingress routes `/api/chat` to web; runtime Secrets sync via workflow instead of committed placeholders.
+Multi-service image bump workflow and `scripts/bump-config-image.sh` support all four workloads.
+
 ## W6D4 summary
 Setup another cloudformation script that tracks the AWS managed cost. Treat missing data as breaching. Notes:
  1. We are not using Bedrock, but using the API directly. 
