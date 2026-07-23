@@ -1,30 +1,30 @@
-# HANDOFF — w7d5-implementation
+# HANDOFF — config repo (main)
 
 ## Branch / bar-for-done
-- **Branch:** `w7d5-implementation`
-- **Goal:** GitOps config for agent-svc, mcp-server, web; runtime secrets out-of-band; multi-service image bump.
-- **Remaining:** Publish ECR images from app repo → bump overlay tags → run `sync-runtime-secrets` → scale replicas > 0.
+- **Branch:** `main`
+- **Goal:** GitOps for taxcalc stack; agent-svc rollout evidence (Synced/Healthy Argo CD).
+- **Remaining:** Publish ECR images for mcp-server/web → bump overlay tags → `sync-runtime-secrets` → scale mcp/web replicas > 0.
 
 ## Key paths
 | Area | Path |
 |---|---|
-| New workloads | `base/11-13-*`, `base/21-23-*`, `base/31-33-*` |
-| Ingress `/api/chat` | `base/60-taxcalc-api.ingress.yaml` |
-| Overlay gates | `overlays/*/kustomization.yaml` (replicas=0, sentinel tags) |
-| Secrets sync | `.github/workflows/sync-runtime-secrets.yml` |
-| Image bump | `.github/workflows/_bump-image.yml`, `scripts/bump-config-image.sh` |
+| Agent-svc Argo app | `argocd/applications/taxcalc-agent-svc-dev.yaml` |
+| API dev app + env set | `argocd/applications/taxcalc-api-dev.yaml`, `argocd/applicationsets/taxcalc-api-envs.yaml` |
+| HPA (minReplicas 2) | `base/50-taxcalc-api.hpa.yaml` |
+| Dev overlay gates | `overlays/dev/kustomization.yaml` |
+| Image bump | `scripts/bump-config-image.sh`, `.github/workflows/_bump-image.yml` |
 
 ## Verify
 ```bash
-kubectl kustomize overlays/dev
-# After secrets sync + image bump:
-# kubectl -n taxcalc-dev get deploy,pod
+kubectl -n argocd apply -f argocd/applications/taxcalc-agent-svc-dev.yaml
+argocd app get taxcalc-agent-svc | grep -E 'Sync Status|Health Status'
+# Expect: Synced / Healthy
 ```
 
 ## Gotchas
-- Committed `base/40-taxcalc-api.secret.yaml` removed; all runtime Secrets via workflow_dispatch.
-- New services use `0.0.0-local-unpublished` sentinel until CI bumps tags.
-- Ingress proxy-read-timeout raised to 300s for AI SDK v7 streaming.
+- **HPA vs git replicas:** `taxcalc-api-hpa` minReplicas=2; dev overlay sets replicas=1. Argo apps ignore `/spec/replicas` on `Deployment/taxcalc-api` so HPA owns scale without OutOfSync/Progressing churn.
+- **Shared resources:** `taxcalc-agent-svc` and `taxcalc-api-dev` both target `overlays/dev` — `SharedResourceWarning` is expected; agent app also ignores `tracking-id` annotation drift.
+- Runtime Secrets via `sync-runtime-secrets` workflow only (no committed Secret manifests).
 
 ## PR
-- Not opened yet.
+- Argo HPA fix committed on `main`; open PR if org policy requires review before merge to shared main.

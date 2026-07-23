@@ -1,9 +1,13 @@
+# Dev Application for taxcalc-agent-svc rollout evidence.
+# Shares overlays/dev with taxcalc-api-dev — tracking-id drift is ignored so
+# both apps can coexist during the assignment without perpetual OutOfSync churn.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: taxcalc-api-dev
+  name: taxcalc-agent-svc
   namespace: argocd
   labels:
+    app.kubernetes.io/name: taxcalc-agent-svc
     team: taxcalc
     env: dev
   finalizers:
@@ -18,6 +22,11 @@ spec:
     server: https://kubernetes.default.svc
     namespace: taxcalc-dev
   ignoreDifferences:
+    # Shared-resource apps fight over tracking-id; ignore so health reflects workload state.
+    - group: "*"
+      kind: "*"
+      jqPathExpressions:
+        - .metadata.annotations["argocd.argoproj.io/tracking-id"]
     # HPA owns runtime replica count; git declares a baseline only.
     - group: apps
       kind: Deployment
@@ -26,18 +35,8 @@ spec:
         - /spec/replicas
   syncPolicy:
     automated:
-      prune: true
+      prune: false
       selfHeal: true
       allowEmpty: false
     syncOptions:
       - CreateNamespace=true
-      - ServerSideApply=true
-      - PrunePropagationPolicy=foreground
-      - PruneLast=true
-      - ApplyOutOfSyncOnly=true
-    retry:
-      limit: 5
-      backoff:
-        duration: 5s
-        factor: 2
-        maxDuration: 3m

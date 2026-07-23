@@ -111,6 +111,7 @@ kubectl -n argocd label secret <cluster-secret-name> uptimecrew.example.internal
 ```bash
 kubectl -n argocd apply -f argocd/projects/taxcalc.yaml
 kubectl -n argocd apply -f argocd/applications/taxcalc-api-dev.yaml
+kubectl -n argocd apply -f argocd/applications/taxcalc-agent-svc-dev.yaml
 kubectl -n argocd apply -f argocd/applicationsets/taxcalc-api-envs.yaml
 ```
 

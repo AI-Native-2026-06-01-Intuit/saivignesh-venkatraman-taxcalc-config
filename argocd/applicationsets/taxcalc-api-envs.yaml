@@ -49,6 +49,13 @@ spec:
       destination:
         server: "{{server}}"
         namespace: "{{namespace}}"
+      ignoreDifferences:
+        # HPA owns runtime replica count; git declares a baseline only.
+        - group: apps
+          kind: Deployment
+          name: taxcalc-api
+          jsonPointers:
+            - /spec/replicas
       syncPolicy:
         automated:
           prune: true
