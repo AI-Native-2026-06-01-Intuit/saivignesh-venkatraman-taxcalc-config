@@ -1,0 +1,301 @@
+# cfn/taxcalc-agent-cost-dev.yaml
+# Agent-svc cost guardrails:
+#   - IRSA role taxcalc-agent-svc-role-sai (Bedrock invoke + optional LLM secret read)
+#   - AWS::Budgets::Budget + BudgetsAction spend-deny on breach (AWS-metered paths)
+#   - SNS notifications (forecast 80% + actual 100%)
+#
+# DRIFT(requirements): BudgetsAction cannot block direct Anthropic API billing.
+# Application-side monthly guard (Redis/Lua in taxcalc-agent-svc) is the real hard
+# stop for Anthropic token spend because it never appears on the AWS bill.
+#
+# Deploy with the ChangeSet flow (trainee IAM lacks budgets:ModifyBudget):
+#   aws cloudformation create-change-set \
+#     --stack-name taxcalc-agent-cost-dev-sai \
+#     --change-set-name initial --change-set-type CREATE \
+#     --template-body file://cfn/taxcalc-agent-cost-dev.yaml \
+#     --parameters ParameterKey=EnvName,ParameterValue=dev \
+#     --capabilities CAPABILITY_NAMED_IAM \
+#     --role-arn arn:aws:iam::043000359802:role/taxcalc-cost-cfn-service-sai \
+#     --region us-east-1
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  taxcalc-agent-svc cost guardrails (sai) — BudgetsAction IAM deny on
+  taxcalc-agent-svc-role-sai for AWS-metered spend.
+
+Parameters:
+  EnvName:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 3500
+    MinValue: 100
+    MaxValue: 100000
+  NotificationEmail:
+    Type: String
+    Default: cost-alarms@example.com
+  BedrockModelId:
+    Type: String
+    Default: anthropic.claude-haiku-4-5-20251001-v1:0
+    Description: Pinned Bedrock foundation model for explicit IAM deny scope.
+  LlmProviderSecretArn:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional Secrets Manager ARN for the direct LLM provider API key. When set,
+      the breach deny policy also blocks secretsmanager:GetSecretValue on it.
+  EksOidcProviderArn:
+    Type: String
+    Default: ""
+    Description: Shared capstone EKS OIDC provider ARN for IRSA. Empty defers trust.
+  EksOidcIssuerHost:
+    Type: String
+    Default: ""
+    Description: OIDC issuer host path (after oidc-provider/, no https://).
+
+Conditions:
+  HasEksOidc: !And
+    - !Not [!Equals [!Ref EksOidcProviderArn, ""]]
+    - !Not [!Equals [!Ref EksOidcIssuerHost, ""]]
+  HasLlmProviderSecret: !Not [!Equals [!Ref LlmProviderSecretArn, ""]]
+
+Resources:
+  CostAlarmsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub taxcalc-agent-cost-alarms-${EnvName}-sai
+
+  CostAlarmsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref CostAlarmsTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowBudgetsPublish
+            Effect: Allow
+            Principal:
+              Service: budgets.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref CostAlarmsTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  AgentSvcRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Stable RoleName taxcalc-agent-svc-role-sai required for IRSA annotation.
+    Properties:
+      RoleName: taxcalc-agent-svc-role-sai
+      Description: >-
+        IRSA role for taxcalc-agent-svc. BudgetsAction attaches the spend-deny
+        managed policy at actual 100% AWS-metered budget breach.
+      AssumeRolePolicyDocument: !If
+        - HasEksOidc
+        - Fn::Sub:
+            - |
+              {
+                "Version": "2012-10-17",
+                "Statement": [
+                  {
+                    "Effect": "Allow",
+                    "Principal": {
+                      "Federated": "${EksOidcProviderArn}"
+                    },
+                    "Action": "sts:AssumeRoleWithWebIdentity",
+                    "Condition": {
+                      "StringEquals": {
+                        "${EksOidcIssuerHost}:aud": "sts.amazonaws.com",
+                        "${EksOidcIssuerHost}:sub": "system:serviceaccount:taxcalc-${EnvName}:taxcalc-agent-svc"
+                      }
+                    }
+                  }
+                ]
+              }
+            - EksOidcProviderArn: !Ref EksOidcProviderArn
+              EksOidcIssuerHost: !Ref EksOidcIssuerHost
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: DenyAllUntilOidcWired
+              Effect: Deny
+              Principal:
+                AWS: "*"
+              Action: sts:AssumeRole
+      Policies:
+        - PolicyName: agent-metered-spend-allow
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: InvokePinnedBedrockIfUsed
+                Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub
+                  - arn:aws:bedrock:us-east-1::foundation-model/${ModelId}
+                  - ModelId: !Ref BedrockModelId
+              - !If
+                - HasLlmProviderSecret
+                - Sid: ReadLlmProviderSecretIfUsed
+                  Effect: Allow
+                  Action:
+                    - secretsmanager:GetSecretValue
+                    - secretsmanager:DescribeSecret
+                  Resource: !Ref LlmProviderSecretArn
+                - !Ref AWS::NoValue
+      Tags:
+        - {Key: Env, Value: !Ref EnvName}
+        - {Key: Project, Value: taxcalc}
+        - {Key: trainee, Value: saivignesh-venkatraman}
+        - {Key: team, Value: capstone-team-5}
+        - {Key: environment, Value: training}
+
+  AgentSvcSpendDenyPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Stable ManagedPolicyName required for BudgetsAction attach/detach.
+    Properties:
+      ManagedPolicyName: !Sub taxcalc-agent-spend-deny-${EnvName}-sai
+      Description: >-
+        Detached deny for bedrock:InvokeModel and LLM secret reads. BudgetsAction
+        attaches to taxcalc-agent-svc-role-sai at actual 100%; detach after reset.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyPinnedBedrockInvoke
+            Effect: Deny
+            Action: bedrock:InvokeModel
+            Resource: !Sub
+              - arn:aws:bedrock:us-east-1::foundation-model/${ModelId}
+              - ModelId: !Ref BedrockModelId
+          - !If
+            - HasLlmProviderSecret
+            - Sid: DenyLlmProviderSecretRead
+              Effect: Deny
+              Action:
+                - secretsmanager:GetSecretValue
+                - secretsmanager:DescribeSecret
+              Resource: !Ref LlmProviderSecretArn
+            - !Ref AWS::NoValue
+
+  BudgetActionRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Stable RoleName taxcalc-agent-budget-action-sai for Budgets execution.
+    Properties:
+      RoleName: taxcalc-agent-budget-action-sai
+      Description: >-
+        Assumed by budgets.amazonaws.com to attach/detach AgentSvcSpendDenyPolicy on
+        taxcalc-agent-svc-role-sai when the monthly AWS budget breaches.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: budgets.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: attach-detach-agent-spend-deny-only
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AttachDetachAgentSpendDenyOnly
+                Effect: Allow
+                Action:
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                Resource: !GetAtt AgentSvcRole.Arn
+                Condition:
+                  ArnEquals:
+                    iam:PolicyARN: !Ref AgentSvcSpendDenyPolicy
+      Tags:
+        - {Key: Env, Value: !Ref EnvName}
+        - {Key: Project, Value: taxcalc}
+        - {Key: trainee, Value: saivignesh-venkatraman}
+        - {Key: team, Value: capstone-team-5}
+        - {Key: environment, Value: training}
+
+  MonthlyCostBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Sub taxcalc-agent-monthly-cost-${EnvName}-sai
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUsd
+          Unit: USD
+        TimeUnit: MONTHLY
+        BudgetType: COST
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref CostAlarmsTopic
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref CostAlarmsTopic
+            - SubscriptionType: EMAIL
+              Address: !Ref NotificationEmail
+      ResourceTags:
+        - {Key: Env, Value: !Ref EnvName}
+        - {Key: Project, Value: taxcalc}
+        - {Key: trainee, Value: saivignesh-venkatraman}
+        - {Key: team, Value: capstone-team-5}
+        - {Key: environment, Value: training}
+
+  AttachAgentSpendDenyOnBudgetBreach:
+    Type: AWS::Budgets::BudgetsAction
+    DependsOn:
+      - MonthlyCostBudget
+      - AgentSvcRole
+    Properties:
+      BudgetName: !Sub taxcalc-agent-monthly-cost-${EnvName}-sai
+      ActionType: APPLY_IAM_POLICY
+      ApprovalModel: AUTOMATIC
+      NotificationType: ACTUAL
+      ActionThreshold:
+        Type: PERCENTAGE
+        Value: 100
+      ExecutionRoleArn: !GetAtt BudgetActionRole.Arn
+      Definition:
+        IamActionDefinition:
+          PolicyArn: !Ref AgentSvcSpendDenyPolicy
+          Roles:
+            - taxcalc-agent-svc-role-sai
+      Subscribers:
+        - Type: SNS
+          Address: !Ref CostAlarmsTopic
+
+Outputs:
+  BudgetName:
+    Description: Monthly AWS cost budget for agent-svc AWS-metered spend.
+    Value: !Ref MonthlyCostBudget
+  AgentSvcRoleArn:
+    Description: IRSA role ARN for taxcalc-agent-svc (eks.amazonaws.com/role-arn).
+    Value: !GetAtt AgentSvcRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-AgentSvcRoleArn"
+  AgentSvcSpendDenyPolicyArn:
+    Description: Detached deny policy attached by BudgetsAction on breach.
+    Value: !Ref AgentSvcSpendDenyPolicy
+  CostAlarmsTopicArn:
+    Description: SNS topic for budget and spend notifications.
+    Value: !Ref CostAlarmsTopic
