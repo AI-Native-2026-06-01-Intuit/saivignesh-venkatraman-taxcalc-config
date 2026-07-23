@@ -37,4 +37,15 @@ IMAGE_BASE="${IMAGE_NAMES[$SERVICE]}"
   kustomize build . >/tmp/kustomize-rendered.yaml
 )
 
+if [[ "$SERVICE" == "taxcalc-agent-svc" ]]; then
+  PATCH="${OVERLAY}/patch-agent-version-label.yaml"
+  if [[ -f "$PATCH" ]]; then
+    if sed --version >/dev/null 2>&1; then
+      sed -i "s/app.kubernetes.io\\/version: .*/app.kubernetes.io\\/version: ${IMAGE_TAG}/" "$PATCH"
+    else
+      sed -i '' "s/app.kubernetes.io\\/version: .*/app.kubernetes.io\\/version: ${IMAGE_TAG}/" "$PATCH"
+    fi
+  fi
+fi
+
 echo "updated ${SERVICE} in overlays/${ENVIRONMENT} to tag ${IMAGE_TAG}"
