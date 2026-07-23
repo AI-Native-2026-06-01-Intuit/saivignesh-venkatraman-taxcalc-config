@@ -5,7 +5,8 @@ metadata:
   labels:
     app.kubernetes.io/name: taxcalc-agent-svc
 data:
-  TAXCALC_AGENT_ENVIRONMENT: k8s
+  # local until taxcalc-mcp-server publishes a non-sentinel image (k8s env gates MCP at startup).
+  TAXCALC_AGENT_ENVIRONMENT: local
   TAXCALC_AGENT_HOST: "0.0.0.0"
   TAXCALC_AGENT_PORT: "8080"
   TAXCALC_AGENT_POSTGRES_HOST: postgres
@@ -16,7 +17,9 @@ data:
   TAXCALC_AGENT_REDIS_PORT: "6379"
   TAXCALC_AGENT_MCP_SSE_URL: http://taxcalc-mcp-server:8000/sse
   TAXCALC_AGENT_QUERY_REWRITE_ENABLED: "false"
-  TAXCALC_AGENT_ALLOW_HEURISTIC_SYNTHESIS: "false"
+  TAXCALC_AGENT_ALLOW_HEURISTIC_SYNTHESIS: "true"
+  # Avoid importing taxcalc_ai.rag (sentence-transformers/torch) into the agent process.
+  TAXCALC_AGENT_USE_INTERNAL_RETRIEVAL_FOR_QUOTES: "false"
   TAXCALC_AGENT_RECURSION_LIMIT: "25"
   TAXCALC_AGENT_REQUEST_COST_LIMIT_USD_E5: "25000"
   TAXCALC_AGENT_MONTHLY_COST_CEILING_USD_E5: "350000000"

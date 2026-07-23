@@ -35,6 +35,9 @@ spec:
           # Sentinel tag — image-bump workflow must replace before enabling replicas.
           image: uptimecrew/taxcalc-agent-svc:0.0.0-local-unpublished
           imagePullPolicy: IfNotPresent
+          # python -m bypasses broken absolute shebangs in older image tags.
+          command: ["python", "-m", "uvicorn"]
+          args: ["taxcalc_agent_svc.app:app", "--host", "0.0.0.0", "--port", "8080"]
           ports:
             - name: http
               containerPort: 8080
@@ -52,18 +55,22 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 256Mi
-            limits:
               memory: 512Mi
+            limits:
+              memory: 2Gi
           livenessProbe:
             httpGet:
               path: /healthz
               port: http
+            initialDelaySeconds: 45
             periodSeconds: 10
             timeoutSeconds: 3
+            failureThreshold: 6
           readinessProbe:
             httpGet:
               path: /readyz
               port: http
-            periodSeconds: 10
+            initialDelaySeconds: 20
+            periodSeconds: 5
             timeoutSeconds: 3
+            failureThreshold: 12
