@@ -1,0 +1,40 @@
+name: _bump-image
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      service:
+        required: true
+        type: string
+      image-tag:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bump-image:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install kustomize
+        run: |
+          set -euo pipefail
+          KUSTOMIZE_VERSION="5.6.0"
+          curl -sSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" \
+            | tar xz kustomize
+          sudo install -m 0755 kustomize /usr/local/bin/kustomize
+
+      - name: Bump selected overlay image
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          SERVICE: ${{ inputs.service }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+        run: |
+          set -euo pipefail
+          bash scripts/bump-config-image.sh "$ENVIRONMENT" "$SERVICE" "$IMAGE_TAG" "$GITHUB_WORKSPACE"
